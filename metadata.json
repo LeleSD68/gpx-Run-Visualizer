@@ -1,0 +1,5 @@
+{
+  "name": "GPX Race Visualizer",
+  "description": "Upload your GPX running tracks to visualize them on a map. Select multiple similar tracks to simulate a race and see your performance.",
+  "requestFramePermissions": []
+}
