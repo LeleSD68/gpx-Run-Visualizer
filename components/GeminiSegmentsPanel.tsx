@@ -1,7 +1,4 @@
 
-
-
-
 import React, { useState, useCallback } from 'react';
 import { GoogleGenAI, Type, GenerateContentResponse } from '@google/genai';
 import { Track, TrackStats, AiSegment } from '../types';
@@ -90,10 +87,12 @@ ${track.points.filter((_, i) => i % Math.max(1, Math.floor(track.points.length /
 `;
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+            // FIX: Initialize GenAI with named parameter for apiKey
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             
+            // FIX: Use gemini-3-flash-preview as per guidelines
             const apiCall = () => ai.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-3-flash-preview',
                 contents: prompt,
                 config: {
                     responseMimeType: "application/json",
@@ -114,9 +113,11 @@ ${track.points.filter((_, i) => i % Math.max(1, Math.floor(track.points.length /
                 },
             });
             
-            const response = await retryWithBackoff(apiCall) as GenerateContentResponse;
+            const response: GenerateContentResponse = await retryWithBackoff(apiCall);
+            window.gpxApp?.addTokens(response.usageMetadata?.totalTokenCount ?? 0);
             
-            const jsonStr = response.text.trim();
+            // FIX: Access .text property directly
+            const jsonStr = (response.text || '').trim();
             const rawSegments = JSON.parse(jsonStr);
 
             const processedSegments: AiSegment[] = rawSegments.map((s: any) => {

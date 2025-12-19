@@ -1,7 +1,6 @@
 
-
-import React, { useRef, useEffect } from 'react';
-import { Track, TrackPoint } from '../types';
+import React, { useState } from 'react';
+import { Track } from '../types';
 import TrackPreview from './TrackPreview';
 
 interface SidebarProps {
@@ -17,7 +16,7 @@ interface SidebarProps {
   onPauseRace: () => void;
   onResumeRace: () => void;
   onResetRace: () => void;
-  simulationState: 'idle' | 'running' | 'paused';
+  simulationState: 'idle' | 'running' | 'paused' | 'finished';
   simulationTime: number;
   onTrackHoverStart: (trackId: string) => void;
   onTrackHoverEnd: () => void;
@@ -38,7 +37,12 @@ interface SidebarProps {
   onToggleGroup: (groupId: string) => void;
   onOpenChangelog: () => void;
   onOpenProfile: () => void;
-  onOpenChat: () => void;
+  tokenCount: number;
+  
+  // Recording Props
+  isRecording?: boolean;
+  onStartRecording?: () => void;
+  onStopRecording?: () => void;
 }
 
 const PlayIcon = () => (
@@ -101,9 +105,22 @@ const UserIcon = () => (
     </svg>
 );
 
-const SparklesIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path d="M10.89 2.11a.75.75 0 0 0-1.78 0l-1.5 3.22-3.53.51a.75.75 0 0 0-.42 1.28l2.55 2.49-.6 3.52a.75.75 0 0 0 1.09.79l3.16-1.66 3.16 1.66a.75.75 0 0 0 1.09-.79l-.6-3.52 2.55-2.49a.75.75 0 0 0-.42-1.28l-3.53-.51-1.5-3.22Z" />
+const UploadCloudIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-10 h-10 mx-auto text-slate-500">
+        <path fillRule="evenodd" d="M11.47 2.47a.75.75 0 0 1 1.06 0l4.5 4.5a.75.75 0 0 1-1.06 1.06l-3.22-3.22V16.5a.75.75 0 0 1-1.5 0V4.81L8.03 8.03a.75.75 0 0 1-1.06-1.06l4.5-4.5ZM3 15.75a.75.75 0 0 1 .75.75v2.25a1.5 1.5 0 0 0 1.5 1.5h10.5a1.5 1.5 0 0 0 1.5-1.5V16.5a.75.75 0 0 1 1.5 0v2.25a3 3 0 0 1-3 3H5.25a3 3 0 0 1-3-3V16.5a.75.75 0 0 1 .75-.75Z" clipRule="evenodd" />
+    </svg>
+);
+
+const RecordIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-red-500">
+        <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm0 8.625a1.125 1.125 0 1 0 0 2.25 1.125 1.125 0 0 0 0-2.25ZM1.5 12a10.5 10.5 0 0 1 10.5-10.5v10.5h10.5a10.5 10.5 0 0 1-10.5 10.5V12H1.5Z" clipRule="evenodd" />
+        <circle cx="12" cy="12" r="6" />
+    </svg>
+);
+
+const StopRecordIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-red-500">
+        <path fillRule="evenodd" d="M4.5 7.5a3 3 0 0 1 3-3h9a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-9a3 3 0 0 1-3-3v-9Z" clipRule="evenodd" />
     </svg>
 );
 
@@ -144,7 +161,7 @@ interface TrackItemProps {
   onToggleVisibility: (trackId: string) => void;
   raceSelectionIds: Set<string>;
   onToggleRaceSelection: (trackId: string) => void;
-  simulationState: 'idle' | 'running' | 'paused';
+  simulationState: 'idle' | 'running' | 'paused' | 'finished';
   onDeleteTrack: (trackId: string) => void;
   onViewDetails: (trackId: string) => void;
   onStartAnimation: (trackId: string) => void;
@@ -222,15 +239,46 @@ const TrackItem: React.FC<TrackItemProps> = ({ track, onTrackHoverStart, onTrack
     </li>
 );
 
+const SHOW_TOKEN_COUNTER = true;
 
 const Sidebar: React.FC<SidebarProps> = ({
   tracks, onFileUpload, visibleTrackIds, onToggleVisibility,
   raceSelectionIds, onToggleRaceSelection, onDeselectAll, onStartRace, onGoToEditor, onPauseRace, onResumeRace, onResetRace, simulationState, simulationTime,
   onTrackHoverStart, onTrackHoverEnd, raceProgress, simulationSpeed, onSpeedChange, lapTimes, sortOrder, onSortChange, onDeleteTrack, onViewDetails, onStartAnimation,
-  raceRanks, runnerSpeeds, runnerDistances, runnerGapsToLeader, collapsedGroups, onToggleGroup, onOpenChangelog, onOpenProfile, onOpenChat
+  raceRanks, runnerSpeeds, runnerDistances, runnerGapsToLeader, collapsedGroups, onToggleGroup, onOpenChangelog, onOpenProfile, tokenCount,
+  isRecording, onStartRecording, onStopRecording
 }) => {
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
 
-  const tracksToDisplay = (simulationState === 'running' || simulationState === 'paused')
+  const handleDragEnter = (e: React.DragEvent<HTMLLabelElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDraggingOver(true);
+  };
+  
+  const handleDragLeave = (e: React.DragEvent<HTMLLabelElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDraggingOver(false);
+  };
+  
+  const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+  };
+  
+  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDraggingOver(false);
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          onFileUpload(Array.from(e.dataTransfer.files));
+          e.dataTransfer.clearData();
+      }
+  };
+
+
+  const tracksToDisplay = (simulationState === 'running' || simulationState === 'paused' || simulationState === 'finished')
       ? tracks.filter(t => raceSelectionIds.has(t.id))
       : tracks;
       
@@ -242,21 +290,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div className="bg-slate-800 text-white flex flex-col h-full p-4 overflow-y-auto">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-cyan-400">
-            GPX Visualizer
-            <span className="text-base font-normal text-slate-500 align-middle ml-2">v1.11</span>
-        </h1>
-        <div className="flex items-center space-x-2">
-            <button 
-                onClick={onOpenChat} 
-                title="Assistente AI" 
-                aria-label="Open AI Assistant"
-                className="flex items-center space-x-1.5 bg-slate-700 hover:bg-slate-600 text-cyan-400 font-semibold py-1.5 px-3 rounded-md transition-colors"
-            >
-                <SparklesIcon />
-                <span>AI</span>
-            </button>
+      <div className="relative bg-slate-900/50 p-4 rounded-lg mb-6 text-center">
+        <div className="absolute top-2 right-2 flex items-center space-x-1">
             <button onClick={onOpenProfile} title="Profilo Utente" aria-label="Open user profile" className="text-slate-400 hover:bg-slate-700 p-1.5 rounded-md transition-colors">
                 <UserIcon />
             </button>
@@ -264,33 +299,53 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <HistoryIcon />
             </button>
         </div>
-      </div>
-
-      
-      <div className="mb-6">
-          <label htmlFor="gpx-upload" className="block text-sm font-medium text-slate-300 mb-2">Carica file GPX / TCX</label>
-          <input
-          id="gpx-upload"
-          type="file"
-          multiple
-          accept=".gpx, .tcx"
-          onChange={(e) => {
-              if (e.target.files) {
-                  // Convert FileList to a stable array to prevent issues where the file reference is lost after clearing the input value.
-                  const filesArray = Array.from(e.target.files);
-                  onFileUpload(filesArray);
-              } else {
-                  onFileUpload(null);
-              }
-              e.currentTarget.value = '';
-          }}
-          className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-cyan-500 file:text-slate-900 hover:file:bg-cyan-400"
-          />
+        <h1 className="text-3xl font-bold text-cyan-400">
+            GPX Visualizer
+        </h1>
+        <div className="text-xs text-slate-500 mt-1 space-x-2">
+            <span>v1.12</span>
+            {SHOW_TOKEN_COUNTER && (
+                <span title="AI token usage since first use. Stored in your browser's local storage.">
+                    | AI Tokens: {tokenCount.toLocaleString()}
+                </span>
+            )}
+        </div>
+        
+        <label 
+            htmlFor="gpx-upload" 
+            className={`relative block w-full border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors duration-200 mt-4
+                ${isDraggingOver ? 'border-cyan-400 bg-slate-700/50' : 'border-slate-600 hover:border-slate-500'}`
+            }
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+        >
+            <UploadCloudIcon />
+            <span className="mt-2 block text-sm font-semibold text-slate-200">
+                Trascina e rilascia i file GPX/TCX
+            </span>
+            <span className="mt-1 block text-xs text-slate-400">o clicca per selezionare</span>
+            <input
+                id="gpx-upload"
+                type="file"
+                multiple
+                accept=".gpx, .tcx"
+                onChange={(e) => {
+                    if (e.target.files) {
+                        const filesArray = Array.from(e.target.files);
+                        onFileUpload(filesArray);
+                    }
+                    e.currentTarget.value = '';
+                }}
+                className="sr-only"
+            />
+        </label>
       </div>
 
       <div className="mb-6 border-t border-slate-700 pt-4">
           <h2 className="text-lg font-semibold text-slate-200 mb-2">Actions</h2>
-          { (simulationState === 'running' || simulationState === 'paused') && <div className="font-mono text-2xl text-amber-400 mb-2">{formatDuration(simulationTime)}</div>}
+          { (simulationState === 'running' || simulationState === 'paused' || simulationState === 'finished') && <div className="font-mono text-2xl text-amber-400 mb-2">{formatDuration(simulationTime)}</div>}
           
           {simulationState === 'idle' ? (
               <div className="space-y-2">
@@ -323,13 +378,16 @@ const Sidebar: React.FC<SidebarProps> = ({
                       >
                           <PauseIcon /> <span className="ml-2">Pause</span>
                       </button>
-                  ) : (
+                  ) : simulationState === 'paused' ? (
                       <button
                           onClick={onResumeRace}
                           className="flex-1 flex items-center justify-center bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md transition-colors"
                       >
                           <PlayIcon /> <span className="ml-2">Resume</span>
                       </button>
+                  ) : (
+                      // Finished state, only Reset is needed
+                      <div className="flex-1" />
                   )}
                   <button
                       onClick={onResetRace}
@@ -337,10 +395,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                   >
                       <ResetIcon /><span className="ml-2">Reset</span>
                   </button>
+                  
+                  {onStartRecording && onStopRecording && (
+                        <button
+                            onClick={isRecording ? onStopRecording : onStartRecording}
+                            className={`flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-3 rounded-md transition-colors ${isRecording ? 'animate-pulse text-red-500' : 'text-slate-300 hover:text-red-400'}`}
+                            title={isRecording ? "Ferma Registrazione" : "Registra Video"}
+                        >
+                            {isRecording ? <StopRecordIcon /> : <RecordIcon />}
+                        </button>
+                  )}
               </div>
           )}
           
-          {(simulationState === 'running' || simulationState === 'paused') && (
+          {(simulationState === 'running' || simulationState === 'paused' || simulationState === 'finished') && (
           <div className="mt-4">
               <label htmlFor="speed-control" className="block text-sm font-medium text-slate-300">
               Speed: <span className="font-bold text-amber-400">{simulationSpeed.toFixed(1)}x</span>
@@ -383,7 +451,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <ul className="space-y-3">
           {tracksToDisplay.map((track) => {
-              const isRacing = simulationState === 'running' || simulationState === 'paused';
+              const isRacing = simulationState === 'running' || simulationState === 'paused' || simulationState === 'finished';
 
               if (isRacing) {
                   const rank = raceRanks.get(track.id);

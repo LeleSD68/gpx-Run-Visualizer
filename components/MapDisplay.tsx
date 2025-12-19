@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { Track, RaceRunner, MapDisplayProps, TrackPoint, PauseSegment, TrackStats, Split, AiSegment } from '../types';
 import { calculateTrackStats } from '../services/trackStatsService';
 import { getTrackPointAtDistance, getPointsInDistanceRange } from '../services/trackEditorUtils';
-import { getTrackSegmentColors } from '../services/colorService';
+import { getTrackSegmentColors, ColoredSegment } from '../services/colorService';
 import TrackPreview from './TrackPreview';
 import AnimationControls from './AnimationControls';
 
@@ -85,9 +85,10 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
     selectionPoints, hoveredPoint, pauseSegments, showPauses, onMapHover, 
     onPauseClick, mapGradientMetric, coloredPauseSegments, animationTrack, 
     animationProgress = 0, onExitAnimation, fastestSplitForAnimation, animationHighlight,
-    animationKmHighlight, isAnimationPlaying, onToggleAnimationPlay, onAnimationProgressChange,
+    isAnimationPlaying, onToggleAnimationPlay, onAnimationProgressChange,
     animationSpeed, onAnimationSpeedChange, fitBoundsCounter = 0,
-    selectedPoint, onPointClick, hoveredLegendValue, aiSegmentHighlight
+    selectedPoint, onPointClick, hoveredLegendValue, aiSegmentHighlight,
+    showSummaryMode, isRecording, onStartRecording, onStopRecording
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -103,8 +104,15 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
   const [hoveredTrack, setHoveredTrack] = useState<Track | null>(null);
   const [hoveredTrackStats, setHoveredTrackStats] = useState<TrackStats | null>(null);
   const animationMarkerRef = useRef<any>(null);
-  const animationProgressPolylineRef = useRef<any>(null);
-  const kmMarkersLayerRef = useRef<any>(null);
+  
+  // New refs for the split animation trail (History + Active Tail)
+  const animationHistoryPolylineRef = useRef<any>(null);
+  const animationTailLayerRef = useRef<any>(null);
+
+  // Use a Map to store marker references for each km
+  const kmMarkersRef = useRef<Map<number, any>>(new Map());
+  const kmMarkersLayerGroupRef = useRef<any>(null);
+
   const [isAutoFitEnabled, setIsAutoFitEnabled] = useState(true);
   const selectedPointPopupRef = useRef<any>(null);
   const legendMarkerRef = useRef<HTMLDivElement | null>(null);
@@ -132,7 +140,7 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
   useEffect(() => {
     if (mapContainerRef.current && !mapRef.current) {
       // Initialize map with a fallback location
-      mapRef.current = L.map(mapContainerRef.current).setView([45.60, 12.88], 13);
+      mapRef.current = L.map(mapContainerRef.current, { preferCanvas: true }).setView([45.60, 12.88], 13);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
         subdomains: 'abcd',
@@ -275,12 +283,19 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
       }
   }, [selectionPoints, tracks, visibleTrackIds, animationTrack, aiSegmentHighlight]);
 
+  // Effect to fit bounds when entering summary mode
+  useEffect(() => {
+      if (showSummaryMode && animationTrack) {
+          fitMapToBounds();
+      }
+  }, [showSummaryMode, animationTrack, fitMapToBounds]);
+
   // Effect for auto-fitting map bounds
   useEffect(() => {
-    if (isAutoFitEnabled && !raceRunners && !animationTrack) {
+    if (isAutoFitEnabled && !raceRunners && !animationTrack && !showSummaryMode) {
       fitMapToBounds();
     }
-  }, [isAutoFitEnabled, fitMapToBounds, raceRunners, animationTrack, visibleTrackIdsKey]);
+  }, [isAutoFitEnabled, fitMapToBounds, raceRunners, animationTrack, visibleTrackIdsKey, showSummaryMode]);
 
   // Effect to programmatically trigger fitMapToBounds
   useEffect(() => {
@@ -428,7 +443,18 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
         };
     }, [animationTrack, animationProgress]);
 
-    // Effect for single track animation
+    // Pre-calculate speed segments for the animation track to improve performance
+    const speedSegments = useMemo(() => {
+        if (!animationTrack) return [];
+        return getTrackSegmentColors(animationTrack, 'speed');
+    }, [animationTrack]);
+
+    const animationTrackStats = useMemo(() => {
+        if (animationTrack) return calculateTrackStats(animationTrack);
+        return null;
+    }, [animationTrack]);
+
+    // Effect for single track animation with fading trail
     useEffect(() => {
         const map = mapRef.current;
         if (!map) return;
@@ -438,13 +464,18 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
                 map.removeLayer(animationMarkerRef.current);
                 animationMarkerRef.current = null;
             }
-            if (animationProgressPolylineRef.current) {
-                map.removeLayer(animationProgressPolylineRef.current);
-                animationProgressPolylineRef.current = null;
+            if (animationHistoryPolylineRef.current) {
+                map.removeLayer(animationHistoryPolylineRef.current);
+                animationHistoryPolylineRef.current = null;
+            }
+            if (animationTailLayerRef.current) {
+                map.removeLayer(animationTailLayerRef.current);
+                animationTailLayerRef.current = null;
             }
         };
 
         if (animationTrack) {
+            // 1. Draw/Update the Marker
             const currentPoint = getTrackPointAtDistance(animationTrack, animationProgress);
             if (currentPoint) {
                 const latlng = [currentPoint.lat, currentPoint.lon];
@@ -461,29 +492,94 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
                     animationMarkerRef.current = L.marker(latlng, { icon: customIcon, zIndexOffset: 1000 }).addTo(map);
                 }
                 
-                // Only pan the map if animation is playing
-                if (isAnimationPlaying) {
+                // Pan map if playing (not in summary mode)
+                if (isAnimationPlaying && !showSummaryMode) {
                     map.panTo(latlng, { animate: true, duration: 0.5, easeLinearity: 1 });
                 }
             }
 
-            // Progress polyline logic
-            const coveredPoints = getPointsInDistanceRange(animationTrack, 0, animationProgress);
-            if (coveredPoints && coveredPoints.length >= 2) {
-                const latlngs = coveredPoints.map(p => [p.lat, p.lon]);
-                if (animationProgressPolylineRef.current) {
-                    animationProgressPolylineRef.current.setLatLngs(latlngs);
-                } else {
-                    animationProgressPolylineRef.current = L.polyline(latlngs, {
-                        color: animationTrack.color,
-                        weight: 5
-                    }).addTo(map);
+            // --- VISUALIZATION: TRAIL & HISTORY ---
+            
+            const TAIL_LENGTH = 0.3; // 300 meters for the colored speed trail
+            const historyEndDistance = Math.max(0, animationProgress - TAIL_LENGTH);
+
+            // 2. Draw History (Light Blue Line)
+            // Covers from 0 to historyEndDistance. In summary mode, covers everything.
+            if (historyEndDistance > 0 || showSummaryMode) {
+                const effectiveEndDistance = showSummaryMode ? animationTrack.distance : historyEndDistance;
+                const historyPoints = getPointsInDistanceRange(animationTrack, 0, effectiveEndDistance);
+                
+                // Ensure continuity: add the exact point at effectiveEndDistance
+                if (!showSummaryMode) {
+                    const tailStartPoint = getTrackPointAtDistance(animationTrack, effectiveEndDistance);
+                    if (tailStartPoint) historyPoints.push(tailStartPoint);
                 }
+
+                if (historyPoints.length > 1) {
+                    const latlngs = historyPoints.map(p => [p.lat, p.lon]);
+                    if (animationHistoryPolylineRef.current) {
+                        animationHistoryPolylineRef.current.setLatLngs(latlngs);
+                    } else {
+                        animationHistoryPolylineRef.current = L.polyline(latlngs, {
+                            color: '#38bdf8', // sky-400 (light blue)
+                            weight: 3,
+                            opacity: 0.5 // Slightly transparent
+                        }).addTo(map);
+                    }
+                }
+            } else if (animationHistoryPolylineRef.current) {
+                animationHistoryPolylineRef.current.setLatLngs([]);
+            }
+
+            // 3. Draw Active Tail (Colored by Speed + Fading Opacity)
+            // Don't draw tail in summary mode (entire track is history)
+            if (animationTailLayerRef.current) {
+                animationTailLayerRef.current.clearLayers();
             } else {
-                // Clear the line if there are not enough points (e.g., at the very start)
-                if (animationProgressPolylineRef.current) {
-                    animationProgressPolylineRef.current.setLatLngs([]);
-                }
+                animationTailLayerRef.current = L.featureGroup().addTo(map);
+            }
+
+            if (!showSummaryMode && speedSegments.length > 0) {
+                // A. Segments strictly inside the tail window [historyEndDistance, animationProgress]
+                // We filter segments that "overlap" with the window, then clamp them.
+                
+                const relevantSegments = speedSegments.filter(seg => 
+                    // Segment starts before end of window AND ends after start of window
+                    seg.p1.cummulativeDistance < animationProgress &&
+                    seg.p2.cummulativeDistance > historyEndDistance
+                );
+
+                relevantSegments.forEach(seg => {
+                    // Determine exact start/end coordinates for this segment within the tail window
+                    // to prevent gaps or overshooting.
+                    
+                    // Start: Max of segment start or tail start (history end)
+                    const effectiveStartDist = Math.max(seg.p1.cummulativeDistance, historyEndDistance);
+                    // End: Min of segment end or tail end (current position)
+                    const effectiveEndDist = Math.min(seg.p2.cummulativeDistance, animationProgress);
+
+                    // If effective segment has length > 0
+                    if (effectiveEndDist > effectiveStartDist) {
+                        const p1Coords = getTrackPointAtDistance(animationTrack, effectiveStartDist);
+                        const p2Coords = getTrackPointAtDistance(animationTrack, effectiveEndDist);
+
+                        if (p1Coords && p2Coords) {
+                             // Calculate opacity based on position in the tail
+                            const distFromTailStart = effectiveStartDist - historyEndDistance;
+                            let opacity = distFromTailStart / TAIL_LENGTH;
+                            opacity = Math.max(0.1, Math.min(1, opacity));
+
+                            L.polyline([
+                                [p1Coords.lat, p1Coords.lon],
+                                [p2Coords.lat, p2Coords.lon]
+                            ], {
+                                color: seg.color,
+                                weight: 5,
+                                opacity: opacity
+                            }).addTo(animationTailLayerRef.current);
+                        }
+                    }
+                });
             }
 
         } else {
@@ -491,56 +587,131 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
         }
         
         return cleanup;
-    }, [animationTrack, animationProgress, isAnimationPlaying]);
+    }, [animationTrack, animationProgress, isAnimationPlaying, speedSegments, showSummaryMode]);
 
-    // Effect for kilometer markers during animation
+    // Effect to initialize km markers
     useEffect(() => {
         const map = mapRef.current;
-        if (!map) return;
+        if (!map || !animationTrack) return;
 
+        // Cleanup function for initial setup
         const cleanup = () => {
-            if (kmMarkersLayerRef.current) {
-                map.removeLayer(kmMarkersLayerRef.current);
-                kmMarkersLayerRef.current = null;
+            if (kmMarkersLayerGroupRef.current) {
+                map.removeLayer(kmMarkersLayerGroupRef.current);
+                kmMarkersLayerGroupRef.current = null;
             }
+            kmMarkersRef.current.clear();
         };
+        cleanup(); // Ensure clean state
+
+        const markersLayer = L.layerGroup().addTo(map);
+        kmMarkersLayerGroupRef.current = markersLayer;
+
+        for (let km = 1; km < animationTrack.distance; km++) {
+            const point = getTrackPointAtDistance(animationTrack, km);
+            if (point) {
+                const isFastest = fastestSplitForAnimation?.splitNumber === km;
+                const iconHtml = `
+                    <div class="km-marker ${isFastest ? 'fastest' : ''}">
+                        ${km}
+                    </div>
+                `;
+                const kmIcon = L.divIcon({
+                    html: iconHtml,
+                    className: 'custom-km-marker-icon',
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 24]
+                });
+
+                const marker = L.marker([point.lat, point.lon], { icon: kmIcon, zIndexOffset: 500, opacity: 0 }); // Initially hidden
+                marker.addTo(markersLayer);
+                kmMarkersRef.current.set(km, marker);
+            }
+        }
+
+        return cleanup;
+    }, [animationTrack, fastestSplitForAnimation]);
+
+
+    // Effect to update km markers (show stats and toggle visibility) based on progress
+    useEffect(() => {
+        if (!animationTrack || !animationTrackStats) return;
+
+        const currentKm = Math.floor(animationProgress);
         
-        if (animationTrack) {
-            cleanup();
+        // Iterate through all markers to update visibility based on progress
+        kmMarkersRef.current.forEach((marker, k) => {
+            if (!marker) return;
 
-            const markers = [];
-            for (let km = 1; km < animationTrack.distance; km++) {
-                if (animationProgress >= km) {
-                    const point = getTrackPointAtDistance(animationTrack, km);
-                    if (point) {
-                        const isFastest = fastestSplitForAnimation?.splitNumber === km;
-                        const iconHtml = `
-                            <div class="km-marker ${isFastest ? 'fastest' : ''}">
-                                ${km}
-                            </div>
-                        `;
-                        const kmIcon = L.divIcon({
-                            html: iconHtml,
-                            className: 'custom-km-marker-icon',
-                            iconSize: [24, 24],
-                            iconAnchor: [12, 24]
-                        });
+            // In summary mode, show all markers. Otherwise check progress.
+            if (showSummaryMode || k <= currentKm) {
+                // Marker passed, show it
+                if (marker.setOpacity && marker.options && marker.options.opacity !== 1) {
+                    marker.setOpacity(1);
+                }
 
-                        const marker = L.marker([point.lat, point.lon], { icon: kmIcon });
-                        markers.push(marker);
+                // Show tooltip logic (only if playing OR in summary mode)
+                if (isAnimationPlaying || showSummaryMode) {
+                    // Defensively check for tooltip existence and state
+                    const tooltip = marker.getTooltip ? marker.getTooltip() : null;
+                    const isTooltipOpen = tooltip && tooltip.isOpen ? tooltip.isOpen() : false;
+
+                    if (!isTooltipOpen && marker.bindTooltip) {
+                        const splitData = animationTrackStats.splits.find(s => s.splitNumber === k);
+                        if (splitData) {
+                            const content = `
+                                <div class="text-xs font-mono bg-slate-900/90 text-white p-1.5 rounded border border-slate-600 shadow-lg leading-tight">
+                                    <div class="font-bold text-amber-400 mb-0.5">Km ${k}</div>
+                                    <div>⏱ ${formatSplitDuration(splitData.duration)}</div>
+                                    <div>⚡ ${formatPace(splitData.pace)}</div>
+                                    <div>⛰ +${Math.round(splitData.elevationGain)}m</div>
+                                </div>
+                            `;
+                            
+                            let direction: 'right' | 'left' | 'top' | 'bottom' | 'auto' = 'auto';
+                            let offset: [number, number] = [14, 0];
+
+                            if (k > 1) {
+                                const prevMarker = kmMarkersRef.current.get(k - 1);
+                                if (prevMarker) {
+                                    const currentLatLng = marker.getLatLng();
+                                    const prevLatLng = prevMarker.getLatLng();
+                                    const dist = currentLatLng.distanceTo(prevLatLng); 
+                                    if (dist < 150) {
+                                        direction = 'bottom';
+                                        offset = [0, 14];
+                                    }
+                                }
+                            }
+
+                            if (!tooltip) {
+                                marker.bindTooltip(content, { 
+                                    permanent: true, 
+                                    direction: direction, 
+                                    offset: offset,
+                                    className: 'km-stat-tooltip',
+                                    opacity: 0.95
+                                });
+                            }
+                            
+                            if (marker.openTooltip) {
+                                marker.openTooltip();
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Marker ahead, hide it (handle rewind)
+                if (marker.setOpacity && marker.options && marker.options.opacity !== 0) {
+                    marker.setOpacity(0);
+                    if (marker.closeTooltip) {
+                        marker.closeTooltip();
                     }
                 }
             }
-            if (markers.length > 0) {
-                kmMarkersLayerRef.current = L.layerGroup(markers).addTo(map);
-            }
-        } else {
-            cleanup();
-        }
+        });
+    }, [animationProgress, isAnimationPlaying, animationTrack, animationTrackStats, showSummaryMode]);
 
-        return cleanup;
-
-    }, [animationTrack, fastestSplitForAnimation, animationProgress]);
 
   // Effect for hovered point on editor chart
   useEffect(() => {
@@ -561,13 +732,68 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
               }).addTo(map);
           }
           hoverMarkerRef.current.bringToFront();
+
+          // Calculate point metrics for the tooltip
+          const track = tracks.find(t => visibleTrackIds.has(t.id));
+          if (track) {
+              const calculatePointMetrics = (point: TrackPoint, track: Track) => {
+                const index = track.points.findIndex(p => p.time.getTime() === point.time.getTime());
+                if (index < 1) return { speed: 0, pace: '--:--' };
+                
+                const p1 = track.points[index - 1];
+                const p2 = track.points[index];
+                
+                const dist = p2.cummulativeDistance - p1.cummulativeDistance;
+                const time = (p2.time.getTime() - p1.time.getTime()) / 3600000;
+                
+                if (time > 0 && dist >= 0) {
+                    const speed = dist / time;
+                    if (speed < 0.1) return { speed: 0, pace: '--:--' };
+
+                    const paceVal = 60 / speed;
+                    const minutes = Math.floor(paceVal);
+                    const seconds = Math.round((paceVal - minutes) * 60);
+                    const paceStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    return { speed, pace: paceStr };
+                }
+                return { speed: 0, pace: '--:--' };
+            };
+
+            const metrics = calculatePointMetrics(hoveredPoint, track);
+            
+            const tooltipContent = `
+                <div class="text-xs font-mono bg-slate-900/90 text-white p-2 rounded border border-slate-600 shadow-xl pointer-events-none">
+                    <div class="font-bold text-sky-400 mb-1">Point Data</div>
+                    <div>📍 ${hoveredPoint.cummulativeDistance.toFixed(2)} km</div>
+                    <div>⛰ ${hoveredPoint.ele.toFixed(1)} m</div>
+                    <div>⚡ ${metrics.pace} /km</div>
+                    ${hoveredPoint.hr ? `<div>❤️ ${hoveredPoint.hr} bpm</div>` : ''}
+                </div>
+            `;
+            
+            // Check if tooltip is already bound
+            if (!hoverMarkerRef.current.getTooltip()) {
+                hoverMarkerRef.current.bindTooltip(tooltipContent, {
+                    permanent: true,
+                    direction: 'top',
+                    offset: [0, -10],
+                    className: 'km-stat-tooltip', // Re-use the transparent class to style manually
+                    opacity: 1
+                });
+            } else {
+                hoverMarkerRef.current.setTooltipContent(tooltipContent);
+            }
+            
+            hoverMarkerRef.current.openTooltip();
+          }
+
       } else {
           if (hoverMarkerRef.current) {
               map.removeLayer(hoverMarkerRef.current);
               hoverMarkerRef.current = null;
           }
       }
-  }, [hoveredPoint]);
+  }, [hoveredPoint, tracks, visibleTrackIds]);
 
     // Effect for selected point popup in editor
     useEffect(() => {
@@ -658,7 +884,7 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
       if (showPauses && pauseSegments && pauseSegments.length > 0) {
           const pauseIcon = L.divIcon({
               html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 text-amber-400 drop-shadow-lg ${onPauseClick ? 'cursor-pointer' : ''}">
-                       <path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM12.75 6a.75.75 0 00-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 000-1.5h-3.75V6z" clip-rule="evenodd" />
+                       <path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM12.75 6a.75.75 0 00-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 0 00-1.5h-3.75V6z" clip-rule="evenodd" />
                      </svg>`,
               className: 'custom-pause-icon',
               iconSize: [24, 24],
@@ -936,7 +1162,8 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
             </button>
        )}
 
-        {animationTrack && (
+        {/* Animation Controls - Hide in Summary Mode */}
+        {animationTrack && !showSummaryMode && (
             <>
                 <StatsDisplay stats={animationStats} />
                 <AnimationControls
@@ -948,6 +1175,9 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
                     speed={animationSpeed!}
                     onSpeedChange={onAnimationSpeedChange!}
                     onExit={onExitAnimation!}
+                    isRecording={isRecording}
+                    onStartRecording={onStartRecording}
+                    onStopRecording={onStopRecording}
                 />
             </>
         )}
@@ -996,42 +1226,20 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
           )}
       </div>
       
-      {animationHighlight && (
+      {(animationHighlight || (showSummaryMode && fastestSplitForAnimation)) && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-900/80 backdrop-blur-md p-4 rounded-xl shadow-2xl border-2 border-amber-400 text-center z-[2000] animate-fade-in-pop w-full max-w-sm">
               <div className="text-amber-400 font-bold text-xl mb-1">⚡️ Kilometro più veloce! ⚡️</div>
               <div className="text-white">
-                  <span className="font-semibold">Km {animationHighlight.splitNumber}</span>
+                  <span className="font-semibold">Km {(animationHighlight || fastestSplitForAnimation!).splitNumber}</span>
               </div>
               <div className="flex justify-center space-x-6 mt-3 text-white">
                   <div>
                       <div className="text-slate-400 text-xs">Ritmo</div>
-                      <div className="text-2xl font-bold font-mono">{formatPace(animationHighlight.pace)}</div>
+                      <div className="text-2xl font-bold font-mono">{formatPace((animationHighlight || fastestSplitForAnimation!).pace)}</div>
                   </div>
                   <div>
                       <div className="text-slate-400 text-xs">Tempo</div>
-                      <div className="text-2xl font-bold font-mono">{formatSplitDuration(animationHighlight.duration)}</div>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {animationKmHighlight && (
-          <div className="absolute bottom-24 right-4 bg-slate-900/80 backdrop-blur-md p-3 rounded-lg shadow-xl border border-slate-600 text-center z-[1500] animate-fade-in-pop w-64">
-              <div className="text-slate-300 font-bold text-lg mb-1">
-                  Km {animationKmHighlight.splitNumber} Completato
-              </div>
-              <div className="flex justify-around mt-2 text-white text-sm">
-                  <div>
-                      <div className="text-slate-400 text-xs">Ritmo</div>
-                      <div className="text-lg font-bold font-mono">{formatPace(animationKmHighlight.pace)}</div>
-                  </div>
-                  <div>
-                      <div className="text-slate-400 text-xs">Tempo</div>
-                      <div className="text-lg font-bold font-mono">{formatSplitDuration(animationKmHighlight.duration)}</div>
-                  </div>
-                  <div>
-                      <div className="text-slate-400 text-xs">Disl.</div>
-                      <div className="text-lg font-bold font-mono">+{Math.round(animationKmHighlight.elevationGain)}m</div>
+                      <div className="text-2xl font-bold font-mono">{formatSplitDuration((animationHighlight || fastestSplitForAnimation!).duration)}</div>
                   </div>
               </div>
           </div>
@@ -1047,6 +1255,15 @@ const MapDisplay: React.FC<MapDisplayProps> = ({
           padding: 2px 6px;
           border-radius: 4px;
           box-shadow: none;
+        }
+        .km-stat-tooltip {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            padding: 0;
+        }
+        .km-stat-tooltip:before {
+            display: none; /* Hide default arrow */
         }
         .custom-pause-icon {
             background: transparent !important;

@@ -1,12 +1,11 @@
-
 export const SAMPLE_GPX_DATA = `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="GPX Visualizer Sample" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
  <metadata>
-  <name>Colosseum Run</name>
+  <name>Colosseum Run (Example)</name>
   <time>2024-08-05T10:00:00Z</time>
  </metadata>
  <trk>
-  <name>Colosseum Run</name>
+  <name>Colosseum Run (Example)</name>
   <trkseg>
    <trkpt lat="41.8902" lon="12.4922"><ele>51</ele><time>2024-08-05T10:00:00Z</time></trkpt>
    <trkpt lat="41.8895" lon="12.4935"><ele>52</ele><time>2024-08-05T10:00:20Z</time></trkpt>

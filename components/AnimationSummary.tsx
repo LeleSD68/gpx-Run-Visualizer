@@ -1,9 +1,4 @@
 
-
-
-
-
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
 import { TrackStats, UserProfile } from '../types';
@@ -24,12 +19,6 @@ const formatPace = (pace: number) => {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-const SparklesIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 mr-2">
-        <path d="M10.89 2.11a.75.75 0 0 0-1.78 0l-1.5 3.22-3.53.51a.75.75 0 0 0-.42 1.28l2.55 2.49-.6 3.52a.75.75 0 0 0 1.09.79l3.16-1.66 3.16 1.66a.75.75 0 0 0 1.09-.79l-.6-3.52 2.55-2.49a.75.75 0 0 0-.42-1.28l-3.53-.51-1.5-3.22Z" />
-    </svg>
-);
-
 const FormattedAnalysis: React.FC<{ text: string }> = ({ text }) => {
     if (!text) return null;
     const parts = text.split(/(\*\*.*?\*\*|\*.*?\*)/g).filter(part => part);
@@ -49,45 +38,12 @@ const FormattedAnalysis: React.FC<{ text: string }> = ({ text }) => {
     );
 };
 
-// START: Retry Logic Helpers
-const isRetryableError = (error: any): boolean => {
-    const errorMessage = (error?.message || '').toLowerCase();
-    return errorMessage.includes('overloaded') || errorMessage.includes('unavailable') || (error?.status === 'UNAVAILABLE');
-};
-
-async function retryWithBackoff<T>(
-  apiCall: () => Promise<T>,
-  maxRetries: number = 3,
-  initialDelay: number = 1000
-): Promise<T> {
-  let attempt = 0;
-  while (attempt < maxRetries) {
-    try {
-      return await apiCall();
-    } catch (error: any) {
-      attempt++;
-      if (attempt >= maxRetries || !isRetryableError(error)) {
-        throw error;
-      }
-      const jitter = Math.random() * initialDelay * 0.5;
-      const delay = (initialDelay * Math.pow(2, attempt - 1)) + jitter;
-      console.warn(`API call failed. Retrying in ${Math.round(delay)}ms...`, error);
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-  throw new Error("Max retries reached. The API is still unavailable.");
-}
-// END: Retry Logic Helpers
-
-
 const AnimationSummary: React.FC<{ trackStats: TrackStats, userProfile: UserProfile, onClose: () => void }> = ({ trackStats, userProfile, onClose }) => {
     const [analysis, setAnalysis] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState('');
 
     const handleAnalyze = useCallback(async () => {
         setIsLoading(true);
-        setError('');
         setAnalysis('');
 
         const fastestSplit = trackStats.splits.find(s => s.isFastest);
@@ -117,19 +73,22 @@ Inizia la tua analisi.
         };
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+            // FIX: Initialize GenAI with named parameter for apiKey
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const prompt = generatePrompt();
             
-            const apiCall = () => ai.models.generateContent({
-                model: 'gemini-2.5-pro',
+            // FIX: Use gemini-3-pro-preview for complex reasoning tasks
+            const response: GenerateContentResponse = await ai.models.generateContent({
+                model: 'gemini-3-pro-preview',
                 contents: prompt,
             });
-
-            const response = await retryWithBackoff(apiCall) as GenerateContentResponse;
-            setAnalysis(response.text);
+            window.gpxApp?.addTokens(response.usageMetadata?.totalTokenCount ?? 0);
+            
+            // FIX: Access .text property directly
+            setAnalysis(response.text || '');
         } catch (e) {
-            setError('Impossibile ottenere l\'analisi dopo diversi tentativi. Riprova più tardi.');
             console.error(e);
+            setAnalysis("Impossibile generare l'analisi creativa al momento.");
         } finally {
             setIsLoading(false);
         }
@@ -153,7 +112,6 @@ Inizia la tua analisi.
                             <p className="text-sm">Il tuo coach AI sta esaminando la tua performance.</p>
                         </div>
                     )}
-                    {error && <p className="text-red-400 text-center bg-red-900/50 p-3 rounded-md">{error}</p>}
                     {analysis && (
                         <div className="text-sm text-slate-300 space-y-2 prose prose-invert max-w-none">
                              {analysis.split('\n').map((line, index) => (

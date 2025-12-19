@@ -12,14 +12,14 @@ import HeartRateZonePanel from './HeartRateZonePanel';
 import PersonalRecordsPanel from './PersonalRecordsPanel';
 import { calculateTrackStats } from '../services/trackStatsService';
 import { getPointsInDistanceRange } from '../services/trackEditorUtils';
-import { getTrackSegmentColors, ColoredSegment } from '../services/colorService';
+import { smoothTrackPoints, calculateSmoothedMetrics } from '../services/dataProcessingService';
 
 
 interface TrackDetailViewProps {
     track: Track;
     userProfile: UserProfile;
     onExit: () => void;
-    onOpenChat: () => void;
+    allHistory?: Track[];
 }
 
 const metricLabels: Record<YAxisMetric, string> = {
@@ -28,12 +28,6 @@ const metricLabels: Record<YAxisMetric, string> = {
     speed: 'Velocità',
     hr: 'FC',
 };
-
-const ChatIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path fillRule="evenodd" d="M4.848 2.771A49.144 49.144 0 0 1 12 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 0 1-14.304 0c-1.978-.292-3.348-2.024-3.348-3.97V6.741c0-1.946 1.37-3.678 3.348-3.97ZM6.75 8.25a.75.75 0 0 1 .75-.75h9a.75.75 0 0 1 0 1.5h-9a.75.75 0 0 1-.75-.75Zm.75 2.25a.75.75 0 0 0 0 1.5H12a.75.75 0 0 0 0-1.5H7.5Z" clipRule="evenodd" />
-    </svg>
-);
 
 const ClockIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 mr-1">
@@ -49,30 +43,32 @@ const GradientIcon = () => (
 );
 
 
-const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, onExit, onOpenChat }) => {
+const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, onExit, allHistory = [] }) => {
     const [yAxisMetrics, setYAxisMetrics] = useState<YAxisMetric[]>(['pace']);
     const [hoveredPoint, setHoveredPoint] = useState<TrackPoint | null>(null);
     const [showPauses, setShowPauses] = useState(false);
     const [selectedSegment, setSelectedSegment] = useState<Split | PauseSegment | AiSegment | null>(null);
     const [mapGradientMetric, setMapGradientMetric] = useState<'none' | 'elevation' | 'pace' | 'speed' | 'hr' | 'hr_zones'>('none');
-    const [gradientSegments, setGradientSegments] = useState<ColoredSegment[]>([]);
     const [hoveredMetricValue, setHoveredMetricValue] = useState<number | null>(null);
+    
+    const [smoothingWindow, setSmoothingWindow] = useState(30);
 
-    useEffect(() => {
-        if (track) {
-            const segments = getTrackSegmentColors(track, mapGradientMetric);
-            setGradientSegments(segments);
-        }
-    }, [track, mapGradientMetric]);
+    const stats = useMemo(() => calculateTrackStats(track, smoothingWindow), [track, smoothingWindow]);
 
-    const stats = useMemo(() => calculateTrackStats(track), [track]);
+    const displayTrack = useMemo(() => {
+        if (smoothingWindow <= 1) return track;
+        return {
+            ...track,
+            points: smoothTrackPoints(track.points, smoothingWindow)
+        };
+    }, [track, smoothingWindow]);
 
     const hasHrData = useMemo(() => {
-        return track.points.some(p => p.hr !== undefined && p.hr > 0) ?? false;
+        return track.points.some(p => p.hr !== undefined && p.hr > 0);
     }, [track]);
     
     useEffect(() => {
-        if (hoveredPoint && track && mapGradientMetric !== 'none' && mapGradientMetric !== 'hr_zones') {
+        if (hoveredPoint && displayTrack && mapGradientMetric !== 'none' && mapGradientMetric !== 'hr_zones') {
             let value: number | null = null;
             if (mapGradientMetric === 'elevation') {
                 value = hoveredPoint.ele;
@@ -81,24 +77,16 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
             } else if (mapGradientMetric === 'speed' || mapGradientMetric === 'pace') {
                 const pointIndex = track.points.findIndex(p => p.time.getTime() === hoveredPoint.time.getTime());
                 if (pointIndex > 0) {
-                    const p1 = track.points[pointIndex - 1];
-                    const p2 = hoveredPoint;
-                    const dist = p2.cummulativeDistance - p1.cummulativeDistance;
-                    const timeHours = (p2.time.getTime() - p1.time.getTime()) / 3600000;
-                     if (timeHours > 1e-6) {
-                        const speed = dist / timeHours;
-                        if (mapGradientMetric === 'speed') value = speed;
-                        else if (speed > 0.1) value = 60 / speed; // pace
-                    } else {
-                        value = mapGradientMetric === 'pace' ? 99 : 0;
-                    }
+                    const { speed, pace } = calculateSmoothedMetrics(track.points, pointIndex, smoothingWindow);
+                    if (mapGradientMetric === 'speed') value = speed;
+                    else value = pace;
                 }
             }
             setHoveredMetricValue(value);
         } else {
             setHoveredMetricValue(null);
         }
-    }, [hoveredPoint, track, mapGradientMetric]);
+    }, [hoveredPoint, track, mapGradientMetric, smoothingWindow]);
 
     const handleHoverChange = useCallback((point: TrackPoint | null) => {
         setHoveredPoint(point);
@@ -108,9 +96,7 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
         setYAxisMetrics(prev => {
             const newMetrics = new Set(prev);
             if (newMetrics.has(metric)) {
-                if (newMetrics.size > 1) { // Can't deselect the last one
-                    newMetrics.delete(metric);
-                }
+                if (newMetrics.size > 1) newMetrics.delete(metric);
             } else {
                 newMetrics.add(metric);
             }
@@ -119,79 +105,35 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
     }, []);
 
     const handleSegmentSelect = useCallback((segment: Split | PauseSegment | AiSegment | null) => {
-        if (!segment) {
-            setSelectedSegment(null);
-            return;
-        }
-        
-        if (selectedSegment) {
-             if ('splitNumber' in segment && 'splitNumber' in selectedSegment && segment.splitNumber === selectedSegment.splitNumber) {
-                setSelectedSegment(null); return;
-            }
-            if ('startPoint' in segment && 'startPoint' in selectedSegment && segment.startPoint.time.getTime() === selectedSegment.startPoint.time.getTime()) {
-                setSelectedSegment(null); return;
-            }
-            if ('type' in segment && segment.type === 'ai' && 'type' in selectedSegment && selectedSegment.type === 'ai' && segment.startDistance === selectedSegment.startDistance) {
-                setSelectedSegment(null); return;
-            }
-        }
-        
         setSelectedSegment(segment);
-    }, [selectedSegment]);
+    }, []);
 
     const selectionPoints = useMemo(() => {
-        if (!selectedSegment || !stats) return null;
-
-        if ('splitNumber' in selectedSegment) { // It's a Split
-            let startDistance = 0;
-            for (let i = 0; i < selectedSegment.splitNumber - 1; i++) {
-                if (stats.splits[i]) {
-                    startDistance += stats.splits[i].distance;
-                }
-            }
-            const endDistance = startDistance + selectedSegment.distance;
-            return getPointsInDistanceRange(track, startDistance, endDistance);
+        if (!selectedSegment) return null;
+        if ('splitNumber' in selectedSegment) {
+            let startDist = (selectedSegment.splitNumber - 1);
+            return getPointsInDistanceRange(displayTrack, startDist, startDist + selectedSegment.distance);
         }
-        
-        if ('startPoint' in selectedSegment) { // It's a PauseSegment
-            return getPointsInDistanceRange(track, selectedSegment.startPoint.cummulativeDistance, selectedSegment.endPoint.cummulativeDistance);
+        if ('startPoint' in selectedSegment) {
+            return getPointsInDistanceRange(displayTrack, selectedSegment.startPoint.cummulativeDistance, selectedSegment.endPoint.cummulativeDistance);
         }
-        
-        if ('type' in selectedSegment && selectedSegment.type === 'ai') { // It's an AiSegment
-            return getPointsInDistanceRange(track, selectedSegment.startDistance, selectedSegment.endDistance);
+        if ('type' in selectedSegment && selectedSegment.type === 'ai') {
+            return getPointsInDistanceRange(displayTrack, selectedSegment.startDistance, selectedSegment.endDistance);
         }
-
         return null;
-    }, [selectedSegment, track, stats]);
+    }, [selectedSegment, displayTrack]);
 
     const highlightedChartRange = useMemo(() => {
-        if (!selectedSegment || !stats) return null;
-
-        if ('splitNumber' in selectedSegment) { // It's a Split
-            let startDistance = 0;
-            for (let i = 0; i < selectedSegment.splitNumber - 1; i++) {
-                if (stats.splits[i]) {
-                    startDistance += stats.splits[i].distance;
-                }
-            }
-            const endDistance = startDistance + selectedSegment.distance;
-            return { startDistance, endDistance };
+        if (!selectedSegment) return null;
+        if ('splitNumber' in selectedSegment) {
+            let startDist = (selectedSegment.splitNumber - 1);
+            return { startDistance: startDist, endDistance: startDist + selectedSegment.distance };
         }
-        
-        if ('startPoint' in selectedSegment) { // It's a PauseSegment
+        if ('startPoint' in selectedSegment) {
             return { startDistance: selectedSegment.startPoint.cummulativeDistance, endDistance: selectedSegment.endPoint.cummulativeDistance };
         }
-        
-        if ('type' in selectedSegment && selectedSegment.type === 'ai') { // It's an AiSegment
+        if ('type' in selectedSegment && selectedSegment.type === 'ai') {
             return { startDistance: selectedSegment.startDistance, endDistance: selectedSegment.endDistance };
-        }
-
-        return null;
-    }, [selectedSegment, stats]);
-    
-    const aiSegmentForMap = useMemo(() => {
-        if(selectedSegment && 'type' in selectedSegment && selectedSegment.type === 'ai') {
-            return selectedSegment;
         }
         return null;
     }, [selectedSegment]);
@@ -199,34 +141,43 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
     const visibleTrackIds = useMemo(() => new Set([track.id]), [track]);
     
     return (
-        <div className="flex flex-col h-screen w-screen font-sans bg-slate-900 text-white">
+        <div className="flex flex-col h-full w-full font-sans text-white">
              <header className="flex items-center justify-between p-3 bg-slate-800 border-b border-slate-700 flex-shrink-0 z-10">
                 <button
                     onClick={onExit}
                     className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-md transition-colors"
                 >
-                    &larr; Back to Visualizer
+                    &larr; Indietro
                 </button>
                 <div className="text-center">
-                    <h1 className="text-xl font-bold text-sky-400">Activity Details</h1>
-                    <p className="text-sm text-slate-400 truncate max-w-md" title={track.name}>{track.name}</p>
+                    <h1 className="text-xl font-bold text-sky-400">Dettagli Attività</h1>
+                    <p className="text-sm text-slate-400 truncate max-w-md">{track.name}</p>
                 </div>
-                 <div className="flex items-center space-x-2">
+                 <div className="flex items-center space-x-4">
+                    <div className="flex flex-col items-end">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold">Smoothing Media: {smoothingWindow}s</span>
+                        <input 
+                            type="range" min="1" max="120" step="1" 
+                            value={smoothingWindow} 
+                            onChange={(e) => setSmoothingWindow(parseInt(e.target.value))}
+                            className="w-32 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                        />
+                    </div>
                     <div className="relative">
-                        <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                        <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
                             <GradientIcon />
                         </div>
                         <select
                             value={mapGradientMetric}
                             onChange={(e) => setMapGradientMetric(e.target.value as any)}
-                            className="bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2 pl-9 pr-4 rounded-md transition-colors appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-sky-500"
+                            className="bg-slate-700 border border-slate-600 text-white text-sm py-2 pl-9 pr-4 rounded-md focus:ring-2 focus:ring-sky-500 appearance-none cursor-pointer"
                         >
-                            <option value="none">Default</option>
-                            <option value="elevation">Elevation</option>
-                            <option value="pace">Pace</option>
-                            <option value="speed">Speed</option>
-                            <option value="hr" disabled={!hasHrData}>Heart Rate (Gradient)</option>
-                            <option value="hr_zones" disabled={!hasHrData}>Heart Rate (Zones)</option>
+                            <option value="none">Mappa: Default</option>
+                            <option value="elevation">Mappa: Elevazione</option>
+                            <option value="pace">Mappa: Ritmo</option>
+                            <option value="speed">Mappa: Velocità</option>
+                            {hasHrData && <option value="hr">Mappa: FC (Gradiente)</option>}
+                            {hasHrData && <option value="hr_zones">Mappa: FC (Zone)</option>}
                         </select>
                     </div>
                  </div>
@@ -234,23 +185,23 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
 
             <main className="flex flex-grow overflow-hidden">
                 <ResizablePanel direction="vertical" initialSize={450} minSize={300}>
-                    <div className="w-full h-full overflow-y-auto p-4 bg-slate-800">
+                    <div className="w-full h-full overflow-y-auto p-4 bg-slate-800 custom-scrollbar">
                         <StatsPanel 
                             stats={stats} 
                             selectedSegment={selectedSegment}
                             onSegmentSelect={handleSegmentSelect}
                         />
-                         {hasHrData && <HeartRateZonePanel track={track} userProfile={userProfile} />}
-                        <PersonalRecordsPanel track={track} />
+                        {hasHrData && <HeartRateZonePanel track={displayTrack} userProfile={userProfile} />}
+                        <PersonalRecordsPanel track={displayTrack} />
                         <WeatherPanel track={track} />
-                        <GeminiTrackAnalysisPanel stats={stats} userProfile={userProfile} track={track} />
-                        <GeminiSegmentsPanel track={track} stats={stats} onSegmentSelect={handleSegmentSelect} selectedSegment={aiSegmentForMap} />
+                        <GeminiTrackAnalysisPanel stats={stats} userProfile={userProfile} track={displayTrack} allHistory={allHistory} />
+                        <GeminiSegmentsPanel track={displayTrack} stats={stats} onSegmentSelect={handleSegmentSelect} selectedSegment={selectedSegment as AiSegment} />
                     </div>
                     <div className="flex-grow flex flex-col h-full">
                         <div className="flex flex-col-reverse flex-grow overflow-hidden h-full">
                             <ResizablePanel direction="horizontal" initialSize={192} minSize={120}>
-                                <div className="bg-slate-800 p-4 relative h-full overflow-hidden">
-                                    <div className="absolute top-2 left-12 z-10 flex items-center bg-slate-700/50 p-1 rounded-md">
+                                <div className="bg-slate-800 p-4 relative h-full overflow-hidden border-t border-slate-700">
+                                    <div className="absolute top-2 left-12 z-10 flex items-center bg-slate-700/80 backdrop-blur-sm p-1 rounded-md border border-slate-600">
                                         <div className="flex space-x-1">
                                             {(['pace', 'elevation', 'speed', 'hr'] as const).map(metric => {
                                                 const isDisabled = metric === 'hr' && !hasHrData;
@@ -260,42 +211,37 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
                                                         key={metric}
                                                         onClick={() => toggleYAxisMetric(metric)}
                                                         disabled={isDisabled}
-                                                        className={`px-3 py-1 text-xs rounded-md transition-colors font-semibold ${
+                                                        className={`px-3 py-1 text-xs rounded transition-colors font-semibold ${
                                                             isActive
                                                                 ? 'bg-sky-500 text-white'
                                                                 : 'bg-slate-600 hover:bg-slate-500 text-slate-300'
-                                                        } ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                                        title={isDisabled ? 'Dati frequenza cardiaca non disponibili' : `Mostra ${metricLabels[metric]}`}
+                                                        } ${isDisabled ? 'opacity-30 cursor-not-allowed' : ''}`}
                                                     >
                                                         {metricLabels[metric]}
                                                     </button>
                                                 );
                                             })}
                                         </div>
-                                        <div className="border-l border-slate-600 h-5 mx-2"></div>
+                                        <div className="border-l border-slate-600 h-4 mx-2"></div>
                                         <button
                                             onClick={() => setShowPauses(p => !p)}
-                                            className={`flex items-center px-3 py-1 text-xs rounded-md transition-colors font-semibold ${
-                                                showPauses
-                                                    ? 'bg-amber-500 text-white'
-                                                    : 'bg-slate-600 hover:bg-slate-500 text-slate-300'
+                                            className={`flex items-center px-3 py-1 text-xs rounded transition-colors font-semibold ${
+                                                showPauses ? 'bg-amber-500 text-white' : 'bg-slate-600 hover:bg-slate-500 text-slate-300'
                                             }`}
-                                            title="Mostra/nascondi pause"
                                         >
-                                            <ClockIcon />
-                                            Pause
+                                            <ClockIcon /> Pause
                                         </button>
                                     </div>
                                     <TimelineChart 
-                                        track={track} 
-                                        onSelectionChange={() => {}} // No selection editing in this view
+                                        track={displayTrack} 
+                                        onSelectionChange={() => {}}
                                         yAxisMetrics={yAxisMetrics}
                                         onChartHover={handleHoverChange}
                                         hoveredPoint={hoveredPoint}
                                         pauseSegments={stats.pauses}
                                         showPauses={showPauses}
                                         highlightedRange={highlightedChartRange}
-                                        gradientSegments={gradientSegments}
+                                        smoothingWindow={smoothingWindow}
                                     />
                                 </div>
                                 <div className="h-full relative">
@@ -312,11 +258,8 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
                                         mapGradientMetric={mapGradientMetric}
                                         animationTrack={null}
                                         animationProgress={0}
-                                        onExitAnimation={() => {}}
-                                        fastestSplitForAnimation={null}
-                                        animationHighlight={null}
                                         hoveredLegendValue={hoveredMetricValue}
-                                        aiSegmentHighlight={aiSegmentForMap}
+                                        aiSegmentHighlight={selectedSegment && 'type' in selectedSegment && selectedSegment.type === 'ai' ? selectedSegment : null}
                                     />
                                 </div>
                             </ResizablePanel>

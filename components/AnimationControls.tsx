@@ -1,5 +1,4 @@
 
-
 import React from 'react';
 
 const PlayIcon = () => (
@@ -20,6 +19,19 @@ const CloseIcon = () => (
     </svg>
 );
 
+const RecordIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-red-500">
+        <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm0 8.625a1.125 1.125 0 1 0 0 2.25 1.125 1.125 0 0 0 0-2.25ZM1.5 12a10.5 10.5 0 0 1 10.5-10.5v10.5h10.5a10.5 10.5 0 0 1-10.5 10.5V12H1.5Z" clipRule="evenodd" />
+        <circle cx="12" cy="12" r="6" />
+    </svg>
+);
+
+const StopRecordIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-red-500">
+        <path fillRule="evenodd" d="M4.5 7.5a3 3 0 0 1 3-3h9a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-9a3 3 0 0 1-3-3v-9Z" clipRule="evenodd" />
+    </svg>
+);
+
 
 interface AnimationControlsProps {
     isPlaying: boolean;
@@ -30,6 +42,9 @@ interface AnimationControlsProps {
     speed: number;
     onSpeedChange: (newSpeed: number) => void;
     onExit: () => void;
+    isRecording?: boolean;
+    onStartRecording?: () => void;
+    onStopRecording?: () => void;
 }
 
 const AnimationControls: React.FC<AnimationControlsProps> = ({
@@ -40,7 +55,10 @@ const AnimationControls: React.FC<AnimationControlsProps> = ({
     onProgressChange,
     speed,
     onSpeedChange,
-    onExit
+    onExit,
+    isRecording,
+    onStartRecording,
+    onStopRecording
 }) => {
     return (
         <div className="absolute bottom-4 left-4 right-4 bg-slate-800/80 backdrop-blur-sm p-4 rounded-lg shadow-2xl flex items-center space-x-4 z-[1000]">
@@ -70,8 +88,19 @@ const AnimationControls: React.FC<AnimationControlsProps> = ({
                     onChange={(e) => onSpeedChange(parseFloat(e.target.value))}
                     className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer"
                 />
-                 <span className="text-sm font-mono text-slate-300 w-10 text-right">{speed.toFixed(1)}x</span>
+                 <span className="text-sm font-mono text-slate-300 w-10 text-right">{speed.toFixed(0)}x</span>
             </div>
+            
+            {onStartRecording && onStopRecording && (
+                <button
+                    onClick={isRecording ? onStopRecording : onStartRecording}
+                    className={`p-2 rounded-full hover:bg-slate-700 transition-colors ${isRecording ? 'animate-pulse' : ''}`}
+                    title={isRecording ? "Stop Recording" : "Start Recording"}
+                >
+                    {isRecording ? <StopRecordIcon /> : <RecordIcon />}
+                </button>
+            )}
+
              <button onClick={onExit} className="text-white hover:text-red-500" title="Esci dall'animazione">
                 <CloseIcon />
             </button>

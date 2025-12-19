@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Track, TrackPoint, PauseSegment, TrackStats, Toast } from '../types';
 import MapDisplay from './MapDisplay';
@@ -8,7 +7,6 @@ import ResizablePanel from './ResizablePanel';
 import { mergeTracks, cutTrackSection, trimTrackToSelection, getPointsInDistanceRange, findPauses, smoothTrackData } from '../services/trackEditorUtils';
 import { exportToGpx } from '../services/exportService';
 import { calculateTrackStats } from '../services/trackStatsService';
-import { getTrackSegmentColors, ColoredSegment } from '../services/colorService';
 
 const useIsMobile = () => {
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -109,7 +107,6 @@ const TrackEditor: React.FC<TrackEditorProps> = ({ initialTracks, onExit, addToa
     const [hoveredPoint, setHoveredPoint] = useState<TrackPoint | null>(null);
     const [showPauses, setShowPauses] = useState(false);
     const [mapGradientMetric, setMapGradientMetric] = useState<'none' | 'elevation' | 'pace' | 'speed' | 'hr' | 'hr_zones'>('none');
-    const [gradientSegments, setGradientSegments] = useState<ColoredSegment[]>([]);
     const [selectionStats, setSelectionStats] = useState<TrackStats | null>(null);
     const [fitBoundsCounter, setFitBoundsCounter] = useState(0);
     const [selectedPoint, setSelectedPoint] = useState<TrackPoint | null>(null);
@@ -136,13 +133,6 @@ const TrackEditor: React.FC<TrackEditorProps> = ({ initialTracks, onExit, addToa
             setHistory([trackToEdit]);
         }
     }, [initialTracks, addToast]);
-    
-    useEffect(() => {
-        if (editedTrack) {
-            const segments = getTrackSegmentColors(editedTrack, mapGradientMetric);
-            setGradientSegments(segments);
-        }
-    }, [editedTrack, mapGradientMetric]);
 
     // Effect to update selection info and map highlight
     useEffect(() => {
@@ -318,14 +308,14 @@ const TrackEditor: React.FC<TrackEditorProps> = ({ initialTracks, onExit, addToa
 
     if (!editedTrack) {
         return (
-            <div className="flex items-center justify-center h-screen bg-slate-900 text-white">
+            <div className="flex items-center justify-center h-full text-white">
                 Loading Editor...
             </div>
         );
     }
     
     return (
-        <div className="flex flex-col h-screen w-screen font-sans bg-slate-900 text-white">
+        <div className="flex flex-col h-full w-full font-sans text-white">
             {/* Header */}
             <header className="flex items-center justify-between p-3 bg-slate-800 border-b border-slate-700 flex-shrink-0 z-10">
                 <button
@@ -499,7 +489,6 @@ const TrackEditor: React.FC<TrackEditorProps> = ({ initialTracks, onExit, addToa
                                         hoveredPoint={hoveredPoint}
                                         pauseSegments={pauseSegments}
                                         showPauses={showPauses}
-                                        gradientSegments={gradientSegments}
                                         selectedPoint={selectedPoint}
                                     />
                                 </div>

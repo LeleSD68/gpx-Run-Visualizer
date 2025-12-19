@@ -1,22 +1,20 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Track, ChatMessage, TrackStats, UserProfile } from '../types';
+import { Track, ChatMessage, UserProfile } from '../types';
 import { GoogleGenAI, Chat, GenerateContentResponse } from '@google/genai';
 import { calculateTrackStats } from '../services/trackStatsService';
-
+import FormattedAnalysis from './FormattedAnalysis';
 
 interface ChatbotProps {
-  onClose: () => void;
-  tracksToAnalyze: Track[];
+  tracksToAnalyze: Track[]; // In questo contesto, allHistory o selection
   userProfile: UserProfile;
 }
 
-const formatDurationForChat = (ms: number) => {
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return `${hours}h ${minutes}m ${seconds}s`;
+const formatPace = (pace: number) => {
+    if (!isFinite(pace) || pace <= 0) return '--:--';
+    const minutes = Math.floor(pace);
+    const seconds = Math.round((pace - minutes) * 60);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
 const SparklesIcon = () => (
@@ -31,108 +29,94 @@ const SendIcon = () => (
     </svg>
 );
 
-const isRetryableError = (error: any): boolean => {
-    const errorMessage = (error?.message || '').toLowerCase();
-    return errorMessage.includes('overloaded') || errorMessage.includes('unavailable') || (error?.status === 'UNAVAILABLE');
-};
-
-const Chatbot: React.FC<ChatbotProps> = ({ onClose, tracksToAnalyze, userProfile }) => {
+const Chatbot: React.FC<ChatbotProps> = ({ tracksToAnalyze, userProfile }) => {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const chatRef = useRef<Chat | null>(null);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
-    const [initialMessage, setInitialMessage] = useState<string>('Ciao! Sono il tuo assistente AI per le corse. Chiedimi di analizzare i tuoi percorsi, confrontare le performance o darti dei consigli.');
+    const scrollAreaRef = useRef<HTMLDivElement>(null);
+    
+    const getSystemInstruction = useCallback(() => {
+        let userContext = `Profilo Atleta: Età ${userProfile.age ?? 'N/D'}, FC Max ${userProfile.maxHr ?? 'N/D'} bpm, Obiettivo: ${userProfile.goal ?? 'Salute Generale'}. `;
 
-    const generateSystemInstruction = useCallback(() => {
-        let context = '';
-        let userContext = '';
-
-        if (userProfile.age || userProfile.maxHr) {
-            userContext = `Ecco i dati dell'atleta: Età: ${userProfile.age ?? 'N/D'}, FC Max: ${userProfile.maxHr ?? 'N/D'}. Usa questi dati per personalizzare le tue risposte.`;
-        }
-
-        if (tracksToAnalyze.length === 0) {
-            context = "L'utente non ha ancora caricato o selezionato alcuna traccia.";
-            setInitialMessage("Carica una traccia GPX per iniziare l'analisi!");
-        } else if (tracksToAnalyze.length === 1) {
-            const track = tracksToAnalyze[0];
-            const stats = calculateTrackStats(track);
-            context = `L'utente sta attualmente analizzando una singola traccia: "${track.name}". 
-            Ecco un riepilogo dettagliato dei dati:
-            - Distanza: ${stats.totalDistance.toFixed(2)} km
-            - Durata: ${formatDurationForChat(stats.movingDuration)}
-            - Passo Medio: ${Math.floor(stats.movingAvgPace)}:${Math.round((stats.movingAvgPace - Math.floor(stats.movingAvgPace)) * 60).toString().padStart(2, '0')} /km
-            - Dislivello: +${Math.round(stats.elevationGain)}m
-            Concentra le tue risposte e consigli su questa specifica attività.`;
-            setInitialMessage(`Pronto ad analizzare "${track.name}". Cosa vuoi sapere?`);
+        // Analisi dello storico (ultime 10 corse)
+        const sortedTracks = [...tracksToAnalyze].sort((a, b) => b.points[0].time.getTime() - a.points[0].time.getTime());
+        const last10 = sortedTracks.slice(0, 10);
+        
+        let historyData = "Storico ultime sessioni:\n";
+        if (last10.length === 0) {
+            historyData += "- Nessuna corsa caricata ancora.";
         } else {
-            const trackSummaries = tracksToAnalyze.map(t => {
-                const stats = calculateTrackStats(t);
-                return `- "${t.name}": ${stats.totalDistance.toFixed(2)} km, passo medio ${Math.floor(stats.movingAvgPace)}:${Math.round((stats.movingAvgPace - Math.floor(stats.movingAvgPace)) * 60).toString().padStart(2, '0')} /km`;
-            }).join('\n');
-            context = `L'utente ha selezionato ${tracksToAnalyze.length} tracce per il confronto. Ecco i riepiloghi:
-            ${trackSummaries}
-            Il tuo ruolo è confrontare queste attività, evidenziando differenze, somiglianze e tendenze di performance.`;
-            setInitialMessage(`Hai selezionato ${tracksToAnalyze.length} tracce. Chiedimi di confrontarle!`);
+            last10.forEach(t => {
+                const s = calculateTrackStats(t);
+                historyData += `- ${t.points[0].time.toLocaleDateString()}: ${t.distance.toFixed(2)}km, Passo ${formatPace(s.movingAvgPace)}/km\n`;
+            });
         }
 
-        return `Sei un chatbot amichevole e un esperto di running, integrato in un'app di visualizzazione di percorsi GPX. Il tuo scopo è aiutare gli utenti ad analizzare le loro attività. Rispondi in italiano. ${userContext} ${context}`;
+        return `Sei un Personal Running Coach AI. Il tuo compito è aiutare l'atleta a capire il suo stato di forma, monitorare i progressi e rispondere a domande tecniche sulla corsa.
+Utilizza i dati dello storico forniti per dare risposte precise e personalizzate. Se noti miglioramenti nel passo o nella costanza, sottolineali.
+Sii motivante ma professionale. Rispondi sempre in italiano.
+
+${userContext}
+
+${historyData}
+
+Conosci ora tutto dell'atleta. Rispondi alle sue domande basandoti su questi dati reali.`;
     }, [tracksToAnalyze, userProfile]);
 
     useEffect(() => {
+        // Se cambiano le tracce o il profilo, resettiamo la sessione per aggiornare il contesto
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-        
         chatRef.current = ai.chats.create({
-            model: 'gemini-2.5-flash',
-            config: {
-                systemInstruction: generateSystemInstruction(),
-            }
+            model: 'gemini-3-flash-preview',
+            config: { systemInstruction: getSystemInstruction() }
         });
+        
+        if (messages.length === 0) {
+            setMessages([{ role: 'model', text: 'Ciao! Ho analizzato il tuo profilo e le tue ultime corse. Come posso aiutarti oggi nel tuo percorso di allenamento?' }]);
+        }
+    }, [getSystemInstruction]); // Riavvia sessione se cambiano i dati base
 
-        setMessages([{ role: 'model', text: initialMessage }]);
-
-    }, [initialMessage, generateSystemInstruction]);
-    
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (scrollAreaRef.current) {
+            scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+        }
     }, [messages, isLoading]);
 
     const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!input.trim() || isLoading) return;
+        if (!input.trim() || isLoading || !chatRef.current) return;
 
-        const userMessage: ChatMessage = { role: 'user', text: input };
-        setMessages(prev => [...prev, userMessage]);
+        const userText = input;
         setInput('');
+        setMessages(prev => [...prev, { role: 'user', text: userText }]);
         setIsLoading(true);
-        
+
         try {
-            if (!chatRef.current) throw new Error("Chat not initialized");
-            
-            const result = await chatRef.current.sendMessageStream({ message: input });
-            
-            let currentText = '';
+            const result = await chatRef.current.sendMessageStream({ message: userText });
             setMessages(prev => [...prev, { role: 'model', text: '' }]);
 
-            // FIX: The `sendMessageStream` method returns an object with a `stream` property that is the async iterator.
-            // The loop must iterate over `result.stream`, not `result` itself.
-            for await (const chunk of (result as any).stream) {
-                currentText += chunk.text;
+            for await (const chunk of result) {
+                const chunkText = chunk.text || '';
+                if (chunk.usageMetadata?.totalTokenCount) {
+                    window.gpxApp?.addTokens(chunk.usageMetadata.totalTokenCount);
+                }
+                
                 setMessages(prev => {
                     const newMessages = [...prev];
-                    newMessages[newMessages.length - 1].text = currentText;
+                    const lastIdx = newMessages.length - 1;
+                    if (newMessages[lastIdx].role === 'model') {
+                        newMessages[lastIdx] = { 
+                            ...newMessages[lastIdx], 
+                            text: newMessages[lastIdx].text + chunkText 
+                        };
+                    }
                     return newMessages;
                 });
             }
-
         } catch (error) {
-            console.error("Error sending message:", error);
-            if (isRetryableError(error)) {
-                setMessages(prev => [...prev, { role: 'model', text: 'Spiacente, l\'assistente AI è al momento sovraccarico. Riprova tra poco.' }]);
-            } else {
-                setMessages(prev => [...prev, { role: 'model', text: 'Spiacente, si è verificato un errore. Riprova.' }]);
-            }
+            console.error("Chat Error:", error);
+            setMessages(prev => [...prev, { role: 'model', text: "Spiacente, si è verificato un errore di connessione. Riprova tra poco." }]);
         } finally {
             setIsLoading(false);
         }
@@ -140,47 +124,54 @@ const Chatbot: React.FC<ChatbotProps> = ({ onClose, tracksToAnalyze, userProfile
 
     return (
         <div className="h-full w-full flex flex-col bg-slate-800 text-white">
-            <header className="flex items-center justify-between p-4 border-b border-slate-700 flex-shrink-0">
-                <div className="flex items-center">
-                    <SparklesIcon />
-                    <h2 className="text-lg font-bold ml-2 text-cyan-400">AI Assistant</h2>
+            <header className="flex items-center p-3 border-b border-slate-700 bg-slate-900 flex-shrink-0">
+                <SparklesIcon />
+                <div className="ml-2">
+                    <h2 className="text-sm font-bold text-cyan-400 uppercase tracking-tighter">Coach AI Personale</h2>
+                    <p className="text-[10px] text-slate-500">Conosce i tuoi ultimi 10 allenamenti</p>
                 </div>
-                <button onClick={onClose} className="text-2xl leading-none p-1 rounded-full hover:bg-slate-700">&times;</button>
             </header>
 
-            <div className="flex-grow p-4 overflow-y-auto space-y-4">
+            <div ref={scrollAreaRef} className="flex-grow p-4 overflow-y-auto space-y-4 custom-scrollbar">
                 {messages.map((msg, index) => (
                     <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] p-3 rounded-2xl ${msg.role === 'user' ? 'bg-cyan-600 rounded-br-lg' : 'bg-slate-700 rounded-bl-lg'}`}>
-                            <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                        <div className={`max-w-[90%] p-3 rounded-2xl ${
+                            msg.role === 'user' 
+                                ? 'bg-cyan-700 text-white rounded-br-none shadow-md' 
+                                : 'bg-slate-700 border border-slate-600 rounded-bl-none shadow-lg'
+                        }`}>
+                            <FormattedAnalysis text={msg.text} />
                         </div>
                     </div>
                 ))}
-                {isLoading && (
+                {isLoading && messages[messages.length-1]?.role === 'user' && (
                     <div className="flex justify-start">
-                         <div className="max-w-[85%] p-3 rounded-2xl bg-slate-700 rounded-bl-lg">
-                            <div className="flex items-center space-x-1.5">
-                                <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-pulse [animation-delay:-0.3s]"></div>
-                                <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-pulse [animation-delay:-0.15s]"></div>
-                                <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-pulse"></div>
+                        <div className="p-3 bg-slate-700 border border-slate-600 rounded-2xl rounded-bl-none animate-pulse">
+                            <div className="flex space-x-1">
+                                <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full"></div>
+                                <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full delay-75"></div>
+                                <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full delay-150"></div>
                             </div>
                         </div>
                     </div>
                 )}
-                <div ref={messagesEndRef} />
             </div>
 
-            <form onSubmit={handleSend} className="p-4 border-t border-slate-700 flex-shrink-0">
-                <div className="flex items-center bg-slate-700 rounded-lg">
+            <form onSubmit={handleSend} className="p-3 border-t border-slate-700 bg-slate-900/50">
+                <div className="flex items-center bg-slate-700 rounded-xl px-2 border border-slate-600 focus-within:border-cyan-500/50 transition-colors">
                     <input
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder={tracksToAnalyze.length > 0 ? "Chiedi qualcosa..." : "Carica una traccia per iniziare"}
-                        className="w-full bg-transparent p-3 focus:outline-none"
-                        disabled={isLoading || tracksToAnalyze.length === 0}
+                        placeholder="Chiedi al tuo coach..."
+                        className="w-full bg-transparent p-3 focus:outline-none text-sm placeholder-slate-500"
+                        disabled={isLoading}
                     />
-                    <button type="submit" disabled={isLoading || !input.trim() || tracksToAnalyze.length === 0} className="p-3 text-cyan-400 disabled:text-slate-500 disabled:cursor-not-allowed">
+                    <button 
+                        type="submit" 
+                        disabled={isLoading || !input.trim()} 
+                        className="p-2 text-cyan-400 hover:text-cyan-300 disabled:opacity-30 transition-colors"
+                    >
                         <SendIcon />
                     </button>
                 </div>

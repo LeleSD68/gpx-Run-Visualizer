@@ -1,7 +1,4 @@
 
-
-
-
 import React, { useState, useEffect } from 'react';
 import { RaceResult, TrackStats, UserProfile, Track } from '../types';
 import StatsPanel from './StatsPanel';
@@ -121,7 +118,6 @@ const RaceSummary: React.FC<RaceSummaryProps> = ({ results, racerStats, onClose,
                         {stats && track && (
                              <div className="p-4 border-t border-slate-600/50 bg-slate-900/40 space-y-4">
                                <StatsPanel stats={stats} selectedSegment={null} onSegmentSelect={() => {}} />
-                               {/* Fix: Pass userProfile and track to GeminiTrackAnalysisPanel */}
                                <GeminiTrackAnalysisPanel stats={stats} userProfile={userProfile} track={track} />
                              </div>
                         )}

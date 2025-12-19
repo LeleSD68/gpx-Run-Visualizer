@@ -1,9 +1,6 @@
 
-
-
-
 import React, { useState, useEffect } from 'react';
-import { UserProfile, PersonalRecord } from '../types';
+import { UserProfile, PersonalRecord, RunningGoal } from '../types';
 import { getStoredPRs } from '../services/prService';
 
 interface UserProfileModalProps {
@@ -11,6 +8,17 @@ interface UserProfileModalProps {
     onSave: (profile: UserProfile) => void;
     currentProfile: UserProfile;
 }
+
+const goalLabels: Record<RunningGoal, string> = {
+    'none': 'Nessun obiettivo specifico',
+    '5k': 'Migliorare sui 5km',
+    '10k': 'Migliorare sui 10km',
+    'half_marathon': 'Preparazione Mezza Maratona',
+    'marathon': 'Preparazione Maratona',
+    'speed': 'Aumentare la Velocità',
+    'endurance': 'Aumentare la Resistenza',
+    'weight_loss': 'Perdita di peso / Salute'
+};
 
 const formatPRTime = (ms: number) => {
     const totalSeconds = ms / 1000;
@@ -56,13 +64,13 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ onClose, onSave, cu
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
-        setProfile(prev => ({ ...prev, [name]: value ? Number(value) : undefined }));
+        setProfile(prev => ({ ...prev, [name]: value ? (name === 'goal' ? value : Number(value)) : undefined }));
     };
     
     const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
          const { name, value } = e.target;
          const finalValue = value === "" ? undefined : value;
-         setProfile(prev => ({ ...prev, [name]: finalValue as UserProfile['gender'] }));
+         setProfile(prev => ({ ...prev, [name]: finalValue as any }));
     }
 
     const handleAutoMaxHr = () => {
@@ -101,13 +109,23 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ onClose, onSave, cu
                             <p className="text-sm text-slate-400">Questi dati aiuteranno a fornire analisi più personalizzate. Vengono salvati solo nel tuo browser.</p>
                             
                             <div>
-                                <label htmlFor="age" className="block text-sm font-medium text-slate-300">Età</label>
-                                <input type="number" name="age" id="age" value={profile.age || ''} onChange={handleChange} className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-white focus:ring-cyan-500 focus:border-cyan-500" />
+                                <label htmlFor="goal" className="block text-sm font-medium text-slate-300">Il tuo Obiettivo</label>
+                                <select name="goal" id="goal" value={profile.goal || 'none'} onChange={handleSelectChange} className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-white focus:ring-cyan-500 focus:border-cyan-500">
+                                    {Object.entries(goalLabels).map(([key, label]) => (
+                                        <option key={key} value={key}>{label}</option>
+                                    ))}
+                                </select>
                             </div>
 
-                            <div>
-                                <label htmlFor="weight" className="block text-sm font-medium text-slate-300">Peso (kg)</label>
-                                <input type="number" name="weight" id="weight" step="0.1" value={profile.weight || ''} onChange={handleChange} className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-white focus:ring-cyan-500 focus:border-cyan-500" />
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label htmlFor="age" className="block text-sm font-medium text-slate-300">Età</label>
+                                    <input type="number" name="age" id="age" value={profile.age || ''} onChange={handleChange} className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-white focus:ring-cyan-500 focus:border-cyan-500" />
+                                </div>
+                                <div>
+                                    <label htmlFor="weight" className="block text-sm font-medium text-slate-300">Peso (kg)</label>
+                                    <input type="number" name="weight" id="weight" step="0.1" value={profile.weight || ''} onChange={handleChange} className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-white focus:ring-cyan-500 focus:border-cyan-500" />
+                                </div>
                             </div>
 
                             <div>

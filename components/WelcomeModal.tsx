@@ -41,19 +41,19 @@ const WelcomeModal: React.FC<WelcomeModalProps> = ({ onClose }) => {
                 onClick={(e) => e.stopPropagation()}
             >
                 <header className="p-6 text-center border-b border-slate-700">
-                    <h2 id="welcome-modal-title" className="text-2xl font-bold text-cyan-400">Welcome to GPX Race Visualizer!</h2>
-                    <p className="text-slate-300 mt-1">Your advanced running analysis tool.</p>
+                    <h2 id="welcome-modal-title" className="text-2xl font-bold text-cyan-400">Benvenuto in GPX Race Visualizer!</h2>
+                    <p className="text-slate-300 mt-1">Il tuo strumento avanzato per l'analisi della corsa.</p>
                 </header>
 
                 <div className="p-6 space-y-6">
-                    <Feature icon="🗺️" title="Visualize Your Runs">
-                        Upload GPX or TCX files to see your activities on an interactive map. I've pre-loaded a sample track for you to explore!
+                    <Feature icon="🗺️" title="Visualizza le tue corse">
+                        Carica file GPX o TCX per vedere le tue attività su una mappa interattiva. Ho pre-caricato un tracciato di esempio per farti esplorare!
                     </Feature>
-                    <Feature icon="🏁" title="Simulate Races">
-                        Select multiple similar tracks to race them against each other in a real-time simulation.
+                    <Feature icon="🏁" title="Simula Gare">
+                        Seleziona più tracce simili per gareggiare l'una contro l'altra in una simulazione in tempo reale.
                     </Feature>
-                    <Feature icon="📊" title="Analyze Performance">
-                        Dive deep into your stats with detailed charts, split analysis, personal record tracking, and AI-powered insights.
+                    <Feature icon="📊" title="Analizza le Performance">
+                        Approfondisci le tue statistiche con grafici dettagliati, analisi dei parziali, tracciamento dei record personali e approfondimenti basati sull'AI.
                     </Feature>
                 </div>
 
@@ -62,7 +62,7 @@ const WelcomeModal: React.FC<WelcomeModalProps> = ({ onClose }) => {
                         onClick={onClose} 
                         className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-4 rounded-md transition-colors"
                     >
-                        Get Started
+                        Inizia
                     </button>
                 </footer>
             </div>

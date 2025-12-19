@@ -1,11 +1,8 @@
 
-
-
-
 import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { Track, TrackPoint, PauseSegment } from '../types';
 import { getTrackPointAtDistance } from '../services/trackEditorUtils';
-import { ColoredSegment } from '../services/colorService';
+import { calculateSmoothedMetrics } from '../services/dataProcessingService';
 
 export type YAxisMetric = 'pace' | 'elevation' | 'speed' | 'hr';
 
@@ -17,14 +14,14 @@ interface TimelineChartProps {
     hoveredPoint: TrackPoint | null;
     showPauses: boolean;
     pauseSegments: PauseSegment[];
-    gradientSegments?: ColoredSegment[];
     highlightedRange?: { startDistance: number; endDistance: number } | null;
     selectedPoint?: TrackPoint | null; // Point selected from map to highlight
+    smoothingWindow?: number;
 }
 
 const metricInfo: Record<YAxisMetric, { label: string, color: string, formatter: (v: number) => string }> = {
     pace: {
-        label: 'Pace',
+        label: 'Ritmo',
         color: '#06b6d4', // cyan-500
         formatter: (pace) => {
             if (!isFinite(pace) || pace <= 0) return '--:--';
@@ -34,17 +31,17 @@ const metricInfo: Record<YAxisMetric, { label: string, color: string, formatter:
         },
     },
     elevation: {
-        label: 'Elevation',
+        label: 'Altitudine',
         color: '#22c55e', // green-500
         formatter: (ele) => `${ele.toFixed(0)}m`,
     },
     speed: {
-        label: 'Speed',
+        label: 'Velocità',
         color: '#f97316', // orange-500
         formatter: (speed) => `${speed.toFixed(1)}km/h`,
     },
     hr: {
-        label: 'Heart Rate',
+        label: 'FC',
         color: '#ef4444', // red-500
         formatter: (hr) => `${hr.toFixed(0)}bpm`,
     },
@@ -59,7 +56,7 @@ const PauseClockIcon: React.FC<{ x: number, y: number }> = ({ x, y }) => (
 );
 
 
-const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange, yAxisMetrics, onChartHover, hoveredPoint, showPauses, pauseSegments, gradientSegments, highlightedRange, selectedPoint }) => {
+const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange, yAxisMetrics, onChartHover, hoveredPoint, showPauses, pauseSegments, highlightedRange, selectedPoint, smoothingWindow = 30 }) => {
     const svgRef = useRef<SVGSVGElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [isPanning, setIsPanning] = useState(false);
@@ -81,28 +78,17 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
 
         return track.points.map((p, i) => {
             const values: { [key in YAxisMetric]?: number | null } = {};
-            // Elevation and HR are direct properties
             values.elevation = p.ele;
             values.hr = p.hr ?? null;
             
-            // Pace and Speed are derived
-            if (i > 0) {
-                const prev = track.points[i - 1];
-                const dist = p.cummulativeDistance - prev.cummulativeDistance;
-                const time = p.time.getTime() - prev.time.getTime(); // ms
-                if (dist > 0 && time > 0) {
-                    const speedKmh = (dist / (time / 3600000));
-                    values.speed = speedKmh;
-                    if (speedKmh > 0.5) {
-                        values.pace = 60 / speedKmh;
-                    } else {
-                        values.pace = null; // Unrealistic pace
-                    }
-                }
-            }
+            // Pace and Speed are now derived using the smoothing window
+            const { speed, pace } = calculateSmoothedMetrics(track.points, i, smoothingWindow);
+            values.speed = speed;
+            values.pace = pace > 0 ? pace : null;
+            
             return { ...p, values };
         });
-    }, [track]);
+    }, [track, smoothingWindow]);
 
     const metricDomains = useMemo(() => {
         const domains: any = {};
@@ -113,10 +99,9 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
             if (validValues.length > 0) {
                 let min = Math.min(...validValues);
                 let max = Math.max(...validValues);
-                if (metric === 'pace') max = Math.min(max, 20); // Cap pace
-                if (metric === 'speed') min = Math.max(min, 0); // Floor speed
+                if (metric === 'pace') max = Math.min(max, 20); // Cap pace a 20 min/km
+                if (metric === 'speed') min = Math.max(min, 0); 
                 
-                // Add padding to domain
                 const range = max - min;
                 min = min - range * 0.05;
                 max = max + range * 0.05;
@@ -156,7 +141,6 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
 
         let hoveredValues: { [key in YAxisMetric]?: number | null } | null = null;
         if (hoveredPoint) {
-            // Find the data point corresponding to the hovered track point
             const dataPoint = pointsWithAllData.find(p => p.time.getTime() === hoveredPoint.time.getTime());
             if (dataPoint) {
                 hoveredValues = dataPoint.values;
@@ -249,16 +233,14 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
         const currentRange = viewRange.max - viewRange.min;
         let newRange = currentRange * delta;
 
-        // Clamp zoom level
         if (newRange > track.distance) newRange = track.distance;
-        if (newRange < 0.01) newRange = 0.01; // min zoom to 10m
+        if (newRange < 0.01) newRange = 0.01;
 
         const mouseRatio = (mouseDistance - viewRange.min) / currentRange;
         
         let newMin = mouseDistance - newRange * mouseRatio;
         let newMax = newMin + newRange;
 
-        // Boundary checks
         if (newMin < 0) {
             newMin = 0;
             newMax = newRange;
@@ -298,8 +280,26 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                 onMouseLeave={handleMouseLeave}
                 onWheel={handleWheel}
             >
+                 <defs>
+                    <linearGradient id="grad-pace" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity="0.6" />
+                        <stop offset="95%" stopColor="#ef4444" stopOpacity="0.6" />
+                    </linearGradient>
+                    <linearGradient id="grad-speed" x1="0" y1="0" x2="0" y2="1">
+                         <stop offset="5%" stopColor="#10b981" stopOpacity="0.6" />
+                         <stop offset="95%" stopColor="#ef4444" stopOpacity="0.6" />
+                    </linearGradient>
+                    <linearGradient id="grad-elevation" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f97316" stopOpacity="0.6" />
+                        <stop offset="95%" stopColor="#22c55e" stopOpacity="0.4" />
+                    </linearGradient>
+                    <linearGradient id="grad-hr" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#ef4444" stopOpacity="0.6" />
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity="0.4" />
+                    </linearGradient>
+                </defs>
+
                 <g transform={`translate(${PADDING.left}, ${PADDING.top})`}>
-                    {/* Y Axis (Normalized) */}
                     {[0, 0.25, 0.5, 0.75, 1].map(ratio => (
                         <g key={`y-axis-${ratio}`}>
                             <text x={-5} y={yScale(ratio)} textAnchor="end" dominantBaseline="middle" fill="#94a3b8" fontSize="10">{`${ratio * 100}%`}</text>
@@ -307,14 +307,12 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                         </g>
                     ))}
 
-                    {/* X Axis */}
                      {xAxisLabels.map(label => (
                         <g key={`${label.value}-${label.x}`}>
                             <text x={label.x} y={height + 15} textAnchor="middle" fill="#94a3b8" fontSize="10">{label.value}</text>
                         </g>
                     ))}
                     
-                     {/* Pause Rectangles */}
                     {showPauses && pauseSegments.map((segment, i) => {
                         const x = xScale(segment.startPoint.cummulativeDistance);
                         const endX = xScale(segment.endPoint.cummulativeDistance);
@@ -334,7 +332,6 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                         );
                     })}
 
-                     {/* Highlighted Segment (from props) */}
                     {highlightedRange && (
                         <rect
                             x={xScale(highlightedRange.startDistance)}
@@ -348,7 +345,6 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                         />
                     )}
 
-                    {/* Data Lines and Fills */}
                     {yAxisMetrics.map((metric, metricIndex) => {
                         const domain = metricDomains[metric];
                         if (!domain) return null;
@@ -369,72 +365,28 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                         if (!linePath) return null;
 
                         const fillPath = `M${linePath} V${height} H${xScale(pointsWithAllData[0].cummulativeDistance)} Z`;
-
                         const isPrimaryMetric = metricIndex === 0;
-                        const hasGradient = isPrimaryMetric && gradientSegments && gradientSegments.length > 0;
 
-                        if (hasGradient) {
-                            return (
-                                <g key={metric}>
-                                    {gradientSegments.map((segment, index) => {
-                                        const p1Data = pointsWithAllData.find(p => p.time.getTime() === segment.p1.time.getTime());
-                                        const p2Data = pointsWithAllData.find(p => p.time.getTime() === segment.p2.time.getTime());
-                                        if (!p1Data || !p2Data) return null;
-
-                                        const value1 = p1Data.values[metric];
-                                        const value2 = p2Data.values[metric];
-                                        if (value1 === null || value1 === undefined || value2 === null || value2 === undefined) return null;
-
-                                        let ratio1 = domainRange > 0 ? (value1 - domain.min) / domainRange : 0.5;
-                                        let ratio2 = domainRange > 0 ? (value2 - domain.min) / domainRange : 0.5;
-                                        if (metric === 'pace') {
-                                            ratio1 = 1 - ratio1;
-                                            ratio2 = 1 - ratio2;
-                                        }
-
-                                        const x1 = xScale(segment.p1.cummulativeDistance);
-                                        const x2 = xScale(segment.p2.cummulativeDistance);
-                                        const y1 = yScale(ratio1);
-                                        const y2 = yScale(ratio2);
-
-                                        const segmentFillPath = `M${x1},${y1} L${x2},${y2} L${x2},${height} L${x1},${height} Z`;
-
-                                        return (
-                                            <g key={`grad-segment-${index}`}>
-                                                <path d={segmentFillPath} fill={segment.color} fillOpacity="0.3" />
-                                                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={segment.color} strokeWidth="2" />
-                                            </g>
-                                        );
-                                    })}
-                                </g>
-                            );
-                        } else {
-                            return (
-                                <g key={metric}>
-                                    {isPrimaryMetric && (
-                                        <path d={fillPath} fill={metricInfo[metric].color} fillOpacity="0.2" />
-                                    )}
-                                    <path d={`M${linePath}`} fill="none" stroke={metricInfo[metric].color} strokeWidth="2" />
-                                </g>
-                            );
-                        }
+                        return (
+                            <g key={metric}>
+                                {isPrimaryMetric && (
+                                    <path d={fillPath} fill={`url(#grad-${metric})`} />
+                                )}
+                                <path d={`M${linePath}`} fill="none" stroke={metricInfo[metric].color} strokeWidth="2" />
+                            </g>
+                        );
                     })}
 
-
-                    {/* Pause Markers */}
                     {showPauses && pauseSegments.map((segment, i) => {
                         const startX = xScale(segment.startPoint.cummulativeDistance);
                         const endX = xScale(segment.endPoint.cummulativeDistance);
                         const midX = (startX + endX) / 2;
-                        // Only render if the midpoint of the pause is visible
                         if (midX >= 0 && midX <= width) {
                             return <PauseClockIcon key={`pause-icon-${i}`} x={midX} y={height - 18} />;
                         }
                         return null;
                     })}
 
-
-                    {/* Selection Rectangle */}
                     {selectionRect && (
                         <rect
                             x={selectionRect.x}
@@ -447,7 +399,6 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                         />
                     )}
                     
-                    {/* Selected Point Marker */}
                     {selectedX !== null && selectedPoint && selectedX >= 0 && selectedX <= width && (
                          <line
                             x1={selectedX} y1={0}
@@ -458,10 +409,8 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                         />
                     )}
 
-                    {/* Hover Line and Tooltip */}
                     {hoveredX !== null && hoveredValues && hoveredPoint && !isDragging && !isPanning && hoveredX >= 0 && hoveredX <= width && (
                         <g pointerEvents="none">
-                            {/* Vertical Line */}
                             <line
                                 x1={hoveredX} y1={0}
                                 x2={hoveredX} y2={height}
@@ -470,7 +419,6 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                                 strokeDasharray="3,3"
                             />
                             
-                             {/* Tooltip Box */}
                             <g transform={`translate(${hoveredX + 15 + 130 > width ? hoveredX - 145 : hoveredX + 15}, 5)`}>
                                 <rect 
                                     x="0" y="0" width="130" height={20 + yAxisMetrics.length * 16} rx="4"
@@ -491,7 +439,6 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                                 })}
                             </g>
 
-                             {/* Circles on Data Lines */}
                              {yAxisMetrics.map(metric => {
                                 const domain = metricDomains[metric];
                                 if (!domain) return null;
@@ -509,8 +456,8 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                 </g>
             </svg>
             <div className="absolute bottom-0 right-2 text-xs text-slate-500 pointer-events-none">
-                {isZoomed ? 'Shift+Drag to Pan / ' : ''}
-                {onSelectionChange && 'Click & Drag to Select'}
+                {isZoomed ? 'Shift+Drag: Pan / ' : ''}
+                {onSelectionChange && 'Drag: Selezione'}
             </div>
             {isZoomed && (
                 <button 

@@ -1,46 +1,25 @@
 
 import { Track, TrackPoint, PauseSegment, TrackStats, Split } from '../types';
 import { findPauses } from './trackEditorUtils';
+import { calculateElevationStats, smoothTrackPoints, calculateSmoothedMetrics } from './dataProcessingService';
 
-const formatPace = (pace: number) => {
-    if (!isFinite(pace) || pace <= 0) {
-        return '--:--';
-    }
-    const minutes = Math.floor(pace);
-    const seconds = Math.round((pace - minutes) * 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-};
-
-const calculateSplits = (track: Track, splitDistance: number = 1.0): Split[] => {
-    if (track.points.length < 2) return [];
+const calculateSplits = (points: TrackPoint[], totalDistance: number, smoothingWindow: number, splitDistance: number = 1.0): Split[] => {
+    if (points.length < 2) return [];
 
     const splits: Omit<Split, 'isFastest' | 'isSlowest'>[] = [];
-    let lastSplitPoint: TrackPoint = track.points[0];
+    let lastSplitPoint: TrackPoint = points[0];
 
-    for (let currentDist = splitDistance; currentDist < track.distance; currentDist += splitDistance) {
-        const splitEndPoint = findPointAtDistance(track, currentDist);
+    for (let currentDist = splitDistance; currentDist < totalDistance; currentDist += splitDistance) {
+        const splitEndPoint = points.find(p => p.cummulativeDistance >= currentDist);
         if (splitEndPoint) {
-            const splitPoints = track.points.filter(p => p.cummulativeDistance > lastSplitPoint.cummulativeDistance && p.cummulativeDistance <= splitEndPoint.cummulativeDistance);
+            const pointsInSplit = points.filter(p => p.cummulativeDistance >= lastSplitPoint.cummulativeDistance && p.cummulativeDistance <= splitEndPoint.cummulativeDistance);
             
-            const pointsForSplit = [lastSplitPoint, ...splitPoints];
-            if (pointsForSplit[pointsForSplit.length-1].cummulativeDistance < splitEndPoint.cummulativeDistance) {
-                pointsForSplit.push(splitEndPoint);
-            }
-
             const duration = splitEndPoint.time.getTime() - lastSplitPoint.time.getTime();
             const distance = splitEndPoint.cummulativeDistance - lastSplitPoint.cummulativeDistance;
 
-            let elevationGain = 0;
-            let elevationLoss = 0;
-            const hrs: number[] = [];
-
-            for (let i = 1; i < pointsForSplit.length; i++) {
-                const eleDiff = pointsForSplit[i].ele - pointsForSplit[i - 1].ele;
-                if (eleDiff > 0) elevationGain += eleDiff;
-                else elevationLoss -= eleDiff;
-
-                if (pointsForSplit[i].hr) hrs.push(pointsForSplit[i].hr!);
-            }
+            const { elevationGain, elevationLoss } = calculateElevationStats(pointsInSplit);
+            
+            const hrs = pointsInSplit.map(p => p.hr).filter((h): h is number => !!h);
             
             splits.push({
                 splitNumber: splits.length + 1,
@@ -56,29 +35,20 @@ const calculateSplits = (track: Track, splitDistance: number = 1.0): Split[] => 
         }
     }
 
-    // Handle final partial split
-    const lastPoint = track.points[track.points.length - 1];
+    // Ultimo km parziale
+    const lastPoint = points[points.length - 1];
     const finalDistance = lastPoint.cummulativeDistance - lastSplitPoint.cummulativeDistance;
-    if (finalDistance > 0.05) { // Only add if it's a meaningful segment
-        const finalDuration = lastPoint.time.getTime() - lastSplitPoint.time.getTime();
-        const pointsForSplit = track.points.filter(p => p.cummulativeDistance > lastSplitPoint.cummulativeDistance);
-        
-        let elevationGain = 0;
-        let elevationLoss = 0;
-        const hrs: number[] = [];
-
-        for (let i = 1; i < pointsForSplit.length; i++) {
-            const eleDiff = pointsForSplit[i].ele - pointsForSplit[i - 1].ele;
-            if (eleDiff > 0) elevationGain += eleDiff;
-            else elevationLoss -= eleDiff;
-             if (pointsForSplit[i].hr) hrs.push(pointsForSplit[i].hr!);
-        }
+    if (finalDistance > 0.05) {
+        const pointsInSplit = points.filter(p => p.cummulativeDistance >= lastSplitPoint.cummulativeDistance);
+        const duration = lastPoint.time.getTime() - lastSplitPoint.time.getTime();
+        const { elevationGain, elevationLoss } = calculateElevationStats(pointsInSplit);
+        const hrs = pointsInSplit.map(p => p.hr).filter((h): h is number => !!h);
 
         splits.push({
             splitNumber: splits.length + 1,
             distance: finalDistance,
-            duration: finalDuration,
-            pace: finalDistance > 0 ? (finalDuration / 1000 / 60) / finalDistance : 0,
+            duration: duration,
+            pace: finalDistance > 0 ? (duration / 1000 / 60) / finalDistance : 0,
             elevationGain,
             elevationLoss,
             avgHr: hrs.length > 0 ? hrs.reduce((a, b) => a + b, 0) / hrs.length : null,
@@ -87,62 +57,19 @@ const calculateSplits = (track: Track, splitDistance: number = 1.0): Split[] => 
 
     if (splits.length === 0) return [];
     
-    // Mark fastest/slowest splits
-    const validSplits = splits.filter(s => s.distance > splitDistance * 0.9);
-    if (validSplits.length > 1) {
-        let fastestPace = Infinity, slowestPace = 0;
-        let fastestIdx = -1, slowestIdx = -1;
-        
-        validSplits.forEach((split, index) => {
-            if (split.pace < fastestPace) {
-                fastestPace = split.pace;
-                fastestIdx = splits.indexOf(split);
-            }
-            if (split.pace > slowestPace) {
-                slowestPace = split.pace;
-                slowestIdx = splits.indexOf(split);
-            }
-        });
+    const validSplits = splits.filter(s => s.distance > splitDistance * 0.5);
+    let fastestPace = Math.min(...validSplits.map(s => s.pace));
+    let slowestPace = Math.max(...validSplits.map(s => s.pace));
 
-        return splits.map((s, i) => ({
-            ...s,
-            isFastest: i === fastestIdx,
-            isSlowest: i === slowestIdx,
-        }));
-    }
-
-    return splits.map(s => ({...s, isFastest: false, isSlowest: false}));
+    return splits.map(s => ({
+        ...s,
+        isFastest: s.pace === fastestPace && s.distance > splitDistance * 0.5,
+        isSlowest: s.pace === slowestPace && s.distance > splitDistance * 0.5,
+    }));
 };
 
-
-const findPointAtDistance = (track: Track, targetDistance: number): TrackPoint | null => {
-    // This is a simplified version of getTrackPointAtDistance from editor utils
-    for (let i = 0; i < track.points.length - 1; i++) {
-        const p1 = track.points[i];
-        const p2 = track.points[i + 1];
-
-        if (p1.cummulativeDistance <= targetDistance && p2.cummulativeDistance >= targetDistance) {
-            const segmentDist = p2.cummulativeDistance - p1.cummulativeDistance;
-            if (segmentDist === 0) return p1;
-
-            const ratio = (targetDistance - p1.cummulativeDistance) / segmentDist;
-            return {
-                lat: p1.lat + (p2.lat - p1.lat) * ratio,
-                lon: p1.lon + (p2.lon - p1.lon) * ratio,
-                ele: p1.ele + (p2.ele - p1.ele) * ratio,
-                time: new Date(p1.time.getTime() + (p2.time.getTime() - p1.time.getTime()) * ratio),
-                cummulativeDistance: targetDistance,
-                hr: p1.hr && p2.hr ? p1.hr + (p2.hr - p1.hr) * ratio : p1.hr
-            };
-        }
-    }
-    return null;
-};
-
-
-export const calculateTrackStats = (track: Track): TrackStats => {
+export const calculateTrackStats = (track: Track, smoothingWindow: number = 0): TrackStats => {
     if (track.points.length < 2) {
-        // Return a zeroed-out stats object for tracks with insufficient data
         return {
             totalDistance: 0, totalDuration: 0, movingDuration: 0,
             elevationGain: 0, elevationLoss: 0, avgPace: 0, movingAvgPace: 0,
@@ -150,41 +77,29 @@ export const calculateTrackStats = (track: Track): TrackStats => {
         };
     }
     
-    const pauses = findPauses(track);
+    // 1. Applichiamo lo smoothing alle coordinate/altitudine/HR
+    const pointsToProcess = smoothingWindow > 0 
+        ? smoothTrackPoints(track.points, smoothingWindow)
+        : track.points;
+
+    // 2. Troviamo le pause
+    const pauses = findPauses({ ...track, points: pointsToProcess });
     const totalPauseDuration = pauses.reduce((sum, p) => sum + p.duration, 0) * 1000;
     const movingDuration = track.duration - totalPauseDuration;
 
-    let elevationGain = 0;
-    let elevationLoss = 0;
+    // 3. Dislivello (calcolato sui punti smoothed)
+    const { elevationGain, elevationLoss } = calculateElevationStats(pointsToProcess);
+
     let maxSpeed = 0;
     const heartRates: number[] = [];
 
-    for (let i = 1; i < track.points.length; i++) {
-        const p1 = track.points[i - 1];
-        const p2 = track.points[i];
-
-        // Elevation
-        const eleDiff = p2.ele - p1.ele;
-        if (eleDiff > 0) {
-            elevationGain += eleDiff;
-        } else {
-            elevationLoss -= eleDiff;
+    // 4. Velocità massima ricalcolata con smoothing
+    for (let i = 1; i < pointsToProcess.length; i++) {
+        const { speed } = calculateSmoothedMetrics(pointsToProcess, i, smoothingWindow);
+        if (speed > maxSpeed && speed < 60) { // Cap a 60kmh per filtrare errori estremi
+            maxSpeed = speed;
         }
-
-        // Speed
-        const dist = p2.cummulativeDistance - p1.cummulativeDistance;
-        const time = (p2.time.getTime() - p1.time.getTime()) / 1000; // in seconds
-        if (time > 0) {
-            const speedKmh = (dist / time) * 3600;
-            if (speedKmh > maxSpeed) {
-                maxSpeed = speedKmh;
-            }
-        }
-        
-        // Heart Rate
-        if (p2.hr) {
-            heartRates.push(p2.hr);
-        }
+        if (pointsToProcess[i].hr) heartRates.push(pointsToProcess[i].hr!);
     }
 
     const avgPace = track.distance > 0 ? (track.duration / 1000 / 60) / track.distance : 0;
@@ -193,10 +108,8 @@ export const calculateTrackStats = (track: Track): TrackStats => {
 
     const validHeartRates = heartRates.filter(hr => hr > 0);
     const avgHr = validHeartRates.length > 0 ? validHeartRates.reduce((a, b) => a + b, 0) / validHeartRates.length : null;
-    const maxHr = validHeartRates.length > 0 ? Math.max(...validHeartRates) : null;
-    const minHr = validHeartRates.length > 0 ? Math.min(...validHeartRates) : null;
     
-    const splits = calculateSplits(track);
+    const splits = calculateSplits(pointsToProcess, track.distance, smoothingWindow);
 
     return {
         totalDistance: track.distance,
@@ -209,8 +122,8 @@ export const calculateTrackStats = (track: Track): TrackStats => {
         maxSpeed,
         avgSpeed,
         avgHr,
-        maxHr,
-        minHr,
+        maxHr: validHeartRates.length > 0 ? Math.max(...validHeartRates) : null,
+        minHr: validHeartRates.length > 0 ? Math.min(...validHeartRates) : null,
         splits,
         pauses,
     };

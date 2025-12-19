@@ -1,5 +1,4 @@
 
-
 import React, { useEffect } from 'react';
 
 interface ChangelogProps {
@@ -7,6 +6,14 @@ interface ChangelogProps {
 }
 
 const changelogData = [
+     {
+        version: 'v1.12',
+        date: '2024-08-06',
+        changes: [
+            'Migliorata la tabella dei parziali nella vista dettagliata dell\'attività con l\'aggiunta di un grafico a barre orizzontale.',
+            'Le barre visualizzano il ritmo di ogni parziale, con colori che evidenziano i parziali più veloci (verde) e più lenti (rosso) per un\'analisi visiva immediata.'
+        ]
+    },
      {
         version: 'v1.11',
         date: '2024-08-05',

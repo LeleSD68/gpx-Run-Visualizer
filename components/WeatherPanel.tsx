@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, GenerateContentResponse } from '@google/genai';
 import { Track, Weather } from '../types';
 
 // Icons
@@ -22,6 +22,53 @@ const HumidityIcon = () => (
     </svg>
 );
 
+// START: Retry Logic Helpers
+const isRetryableError = (e: any): boolean => {
+    const message = e.message || '';
+    if (message.includes('{') && message.includes('}')) {
+        try {
+            const parsed = JSON.parse(message);
+            const status = parsed?.error?.status || '';
+            const code = parsed?.error?.code;
+            if (code === 503 || status === 'UNAVAILABLE') return true;
+        } catch (parseError) {
+            // Ignore
+        }
+    }
+    const status = e?.status || e?.error?.status || '';
+    const code = e?.code || e?.error?.code;
+    if (code === 503 || status === 'UNAVAILABLE' || status.toLowerCase() === 'unavailable') return true;
+
+    const fullErrorString = (JSON.stringify(e) || '').toLowerCase();
+    return fullErrorString.includes('overloaded') || fullErrorString.includes('unavailable');
+};
+
+async function retryWithBackoff<T>(
+  apiCall: () => Promise<T>,
+  maxRetries: number = 3,
+  initialDelay: number = 1000
+): Promise<T> {
+  let attempt = 0;
+  let lastError: any;
+  while (attempt < maxRetries) {
+    try {
+      return await apiCall();
+    } catch (error: any) {
+      lastError = error;
+      attempt++;
+      if (attempt >= maxRetries || !isRetryableError(error)) {
+        throw error;
+      }
+      const jitter = Math.random() * initialDelay * 0.5;
+      const delay = (initialDelay * Math.pow(2, attempt - 1)) + jitter;
+      console.warn(`API call failed. Retrying in ${Math.round(delay)}ms...`, error);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+// END: Retry Logic Helpers
+
 
 const WeatherPanel: React.FC<{ track: Track }> = ({ track }) => {
     const [weather, setWeather] = useState<Weather | null>(null);
@@ -41,9 +88,12 @@ const WeatherPanel: React.FC<{ track: Track }> = ({ track }) => {
         const prompt = `Agisci come un'API meteorologica. Per la località con latitudine ${startPoint.lat} e longitudine ${startPoint.lon} nella data ${date}, fornisci le condizioni meteorologiche tipiche. Rispondi SOLO con un oggetto JSON.`;
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-            const response = await ai.models.generateContent({
-              model: 'gemini-2.5-flash',
+            // FIX: Initialize GenAI with named parameter for apiKey
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            
+            // FIX: Use gemini-3-flash-preview as per guidelines
+            const apiCall = () => ai.models.generateContent({
+              model: 'gemini-3-flash-preview',
               contents: prompt,
               config: {
                 responseMimeType: "application/json",
@@ -58,13 +108,17 @@ const WeatherPanel: React.FC<{ track: Track }> = ({ track }) => {
                 },
               },
             });
+
+            const response: GenerateContentResponse = await retryWithBackoff(apiCall);
+            window.gpxApp?.addTokens(response.usageMetadata?.totalTokenCount ?? 0);
             
-            const jsonStr = response.text.trim();
+            // FIX: Access .text property directly
+            const jsonStr = (response.text || '').trim();
             const weatherData = JSON.parse(jsonStr);
             setWeather(weatherData);
 
         } catch (e) {
-            setError('Could not fetch weather data.');
+            setError('Could not fetch weather data after several attempts.');
             console.error(e);
         } finally {
             setIsLoading(false);

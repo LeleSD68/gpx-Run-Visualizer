@@ -1,8 +1,4 @@
 
-
-
-
-
 export interface TrackPoint {
   lat: number;
   lon: number;
@@ -76,6 +72,12 @@ export interface MapDisplayProps {
   onAnimationSpeedChange?: (speed: number) => void;
   fitBoundsCounter?: number;
   aiSegmentHighlight?: AiSegment | null;
+  showSummaryMode?: boolean;
+  
+  // Recording Props
+  isRecording?: boolean;
+  onStartRecording?: () => void;
+  onStopRecording?: () => void;
 }
 
 
@@ -140,12 +142,15 @@ export interface AiSegment {
   elevationGain: number;
 }
 
+export type RunningGoal = 'none' | '5k' | '10k' | 'half_marathon' | 'marathon' | 'speed' | 'endurance' | 'weight_loss';
+
 export interface UserProfile {
   age?: number;
   weight?: number;
   gender?: 'male' | 'female' | 'other';
   maxHr?: number;
   restingHr?: number;
+  goal?: RunningGoal;
 }
 
 export interface PersonalRecord {
@@ -160,4 +165,18 @@ export interface Toast {
   id: number;
   message: string;
   type: 'success' | 'error' | 'info';
+}
+
+declare global {
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+
+  interface Window {
+    gpxApp?: {
+      addTokens: (count: number) => void;
+    };
+    aistudio?: AIStudio;
+  }
 }

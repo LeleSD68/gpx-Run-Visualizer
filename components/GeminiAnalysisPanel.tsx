@@ -1,6 +1,4 @@
 
-
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
 import { TrackStats } from '../types';
@@ -114,6 +112,7 @@ La tua analisi dettagliata:`;
             });
 
             const response: GenerateContentResponse = await retryWithBackoff(apiCall);
+            window.gpxApp?.addTokens(response.usageMetadata?.totalTokenCount ?? 0);
             setAnalysis(response.text);
         } catch (e) {
             setError('Impossibile ottenere l\'analisi dopo diversi tentativi. Riprova più tardi.');
