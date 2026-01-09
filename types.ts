@@ -1,4 +1,8 @@
 
+export type ActivityType = 'Lento' | 'Fartlek' | 'Gara' | 'Ripetute' | 'Lungo' | 'Altro';
+
+export type AiPersonality = 'strict' | 'motivator' | 'enthusiast' | 'analytic' | 'pro_balanced';
+
 export interface TrackPoint {
   lat: number;
   lon: number;
@@ -6,6 +10,7 @@ export interface TrackPoint {
   time: Date;
   cummulativeDistance: number;
   hr?: number; // Heart rate in BPM
+  cad?: number; // Cadence in SPM (steps per minute)
 }
 
 export interface Track {
@@ -16,12 +21,28 @@ export interface Track {
   distance: number; // in kilometers
   duration: number; // in milliseconds
   groupId?: string;
+  // Nuovi campi metadata
+  activityType?: ActivityType;
+  isFavorite?: boolean;
+  folder?: string;
+  notes?: string; // Note specifiche per la corsa
+  shoe?: string; // Modello di scarpa usata
+}
+
+export interface PlannedWorkout {
+    id: string;
+    title: string;
+    description: string;
+    date: Date;
+    activityType: ActivityType;
+    isAiSuggested: boolean;
 }
 
 export interface RaceRunner {
   trackId: string;
   position: { lat: number; lon: number };
   color: string;
+  pace: number; // Ritmo attuale in min/km
 }
 
 export interface RaceResult {
@@ -31,7 +52,7 @@ export interface RaceResult {
   color: string;
   finishTime: number; // ms
   avgSpeed: number; // km/h
-  distance: number; // km
+  distance: number; // km;
 }
 
 export interface PauseSegment {
@@ -51,6 +72,7 @@ export interface MapDisplayProps {
   pauseSegments?: PauseSegment[]; // For editor pause markers
   showPauses?: boolean;
   onMapHover?: (point: TrackPoint | null) => void; // For editor map hover -> chart sync
+  onTrackHover?: (trackId: string | null) => void; // Callback for track hover synchronization
   onPauseClick?: (segment: PauseSegment) => void;
   mapGradientMetric?: 'none' | 'elevation' | 'pace' | 'speed' | 'hr' | 'hr_zones';
   coloredPauseSegments?: PauseSegment[];
@@ -73,11 +95,7 @@ export interface MapDisplayProps {
   fitBoundsCounter?: number;
   aiSegmentHighlight?: AiSegment | null;
   showSummaryMode?: boolean;
-  
-  // Recording Props
-  isRecording?: boolean;
-  onStartRecording?: () => void;
-  onStopRecording?: () => void;
+  theme?: 'dark' | 'light';
 }
 
 
@@ -120,6 +138,7 @@ export interface RaceHighlight {
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
+  suggestedWorkout?: Omit<PlannedWorkout, 'id'>; // AI can attach a workout proposal
 }
 
 export interface Weather {
@@ -150,7 +169,11 @@ export interface UserProfile {
   gender?: 'male' | 'female' | 'other';
   maxHr?: number;
   restingHr?: number;
-  goal?: RunningGoal;
+  goals?: RunningGoal[];
+  aiPersonality?: AiPersonality;
+  personalNotes?: string; // Note generali (infortuni, etc)
+  shoes?: string[]; // Lista di scarpe possedute
+  theme?: 'dark' | 'light';
 }
 
 export interface PersonalRecord {
@@ -165,6 +188,12 @@ export interface Toast {
   id: number;
   message: string;
   type: 'success' | 'error' | 'info';
+}
+
+// Added Commentary interface
+export interface Commentary {
+    time: number;
+    text: string;
 }
 
 declare global {

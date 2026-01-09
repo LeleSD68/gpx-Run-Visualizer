@@ -1,5 +1,7 @@
+
 import { parseGpx } from './gpxService';
 import { parseTcx } from './tcxService';
+import { generateSmartTitle } from './titleGenerator';
 import type { Track } from '../types';
 
 // This is a simplified version of the main app's getTrackFingerprint.
@@ -36,13 +38,18 @@ self.onmessage = async (e: MessageEvent<{ files: File[], existingTrackFingerprin
                 if (existingTrackFingerprints.has(newTrackFingerprint)) {
                     parsingResults.skippedCount++;
                 } else {
+                    // Generate a descriptive smart title using shared logic
+                    const smartData = generateSmartTitle(parsedData.points, parsedData.distance, parsedData.name);
+
                     const newTrack: Track = {
                         id: `${file.name}-${new Date().getTime()}`,
-                        name: parsedData.name,
+                        name: smartData.title,
                         points: parsedData.points,
                         color: colors[(tracksLength + newTracksCount) % colors.length],
                         distance: parsedData.distance,
                         duration: parsedData.duration,
+                        folder: smartData.folder,
+                        activityType: smartData.activityType
                     };
                     parsingResults.newTracks.push(newTrack);
                     existingTrackFingerprints.add(newTrackFingerprint);

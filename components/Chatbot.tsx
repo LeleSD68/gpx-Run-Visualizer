@@ -1,14 +1,33 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Track, ChatMessage, UserProfile } from '../types';
-import { GoogleGenAI, Chat, GenerateContentResponse } from '@google/genai';
+import { Track, ChatMessage, UserProfile, AiPersonality, PlannedWorkout, ActivityType } from '../types';
+import { GoogleGenAI, Chat, Type, GenerateContentResponse } from '@google/genai';
 import { calculateTrackStats } from '../services/trackStatsService';
+import { loadChatFromDB, saveChatToDB } from '../services/dbService';
 import FormattedAnalysis from './FormattedAnalysis';
 
 interface ChatbotProps {
-  tracksToAnalyze: Track[]; // In questo contesto, allHistory o selection
+  tracksToAnalyze: Track[];
   userProfile: UserProfile;
+  onClose?: () => void;
+  isStandalone?: boolean;
+  onAddPlannedWorkout?: (workout: PlannedWorkout) => void;
+  isSidebar?: boolean;
 }
+
+const SUGGESTIONS = [
+    "Cosa dovrei correre domani?",
+    "Preparami un programma per la settimana",
+    "Analizza il mio carico di lavoro"
+];
+
+const personalityPrompts: Record<AiPersonality, string> = {
+    'pro_balanced': "Sei un coach professionista equilibrato. Fornisci feedback oggettivi, tecnici e realistici. Non essere eccessivamente motivatore né troppo severo. Di' le cose come stanno in modo costruttivo.",
+    'strict': "Sei un allenatore severo ma giusto. Non accetti scuse, punta alla perfezione tecnica e sii molto critico se i dati non sono ottimali. Usa un tono autorevole.",
+    'motivator': "Sei un motivatore instancabile. Focalizzati sul superamento dei limiti e sulla crescita personale, infondi coraggio anche se i dati sono negativi.",
+    'enthusiast': "Sei entusiasta e pieno di energia! Celebra ogni chilometro come una vittoria epica. Usa un tono molto vivace, colorito e gioioso, con molti punti esclamativi.",
+    'analytic': "Sei un analista puramente tecnico e freddo. Basati solo numeri, evita fronzoli emotivi e fornisci insight puramente statistici e scientifici."
+};
 
 const formatPace = (pace: number) => {
     if (!isFinite(pace) || pace <= 0) return '--:--';
@@ -18,164 +37,163 @@ const formatPace = (pace: number) => {
 };
 
 const SparklesIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-cyan-400">
         <path d="M10.89 2.11a.75.75 0 0 0-1.78 0l-1.5 3.22-3.53.51a.75.75 0 0 0-.42 1.28l2.55 2.49-.6 3.52a.75.75 0 0 0 1.09.79l3.16-1.66 3.16 1.66a.75.75 0 0 0 1.09-.79l-.6-3.52 2.55-2.49a.75.75 0 0 0-.42-1.28l-3.53-.51-1.5-3.22Z" />
     </svg>
 );
 
-const SendIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path d="M3.105 2.289a.75.75 0 0 0-.826.95l1.414 4.949a.75.75 0 0 0 .95.95l4.95-1.414a.75.75 0 0 0-.95-.95l-3.539 1.01-1.01-3.54a.75.75 0 0 0-.95-.826ZM12.23 7.77a.75.75 0 0 0-1.06 0l-4.25 4.25a.75.75 0 0 0 0 1.06l4.25 4.25a.75.75 0 0 0 1.06-1.06l-3.72-3.72 3.72-3.72a.75.75 0 0 0 0-1.06ZM15.5 10a.75.75 0 0 1 .75-.75h.01a.75.75 0 0 1 0 1.5H16.25a.75.75 0 0 1-.75-.75Z" />
+const CalendarAddIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 mr-1.5">
+        <path fillRule="evenodd" d="M5.75 2a.75.75 0 0 1 .75.75V4h7V2.75a.75.75 0 0 1 1.5 0V4h.25A2.75 2.75 0 0 1 18 6.75v8.5A2.75 2.75 0 0 1 15.25 18H4.75A2.75 2.75 0 0 1 2 15.25v-8.5A2.75 2.75 0 0 1 4.75 4H5V2.75A.75.75 0 0 1 5.75 2Zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75ZM10 9.75a.75.75 0 0 1 .75.75v1.5h1.5a.75.75 0 0 1 0 1.5h-1.5v1.5a.75.75 0 0 1-1.5 0v-1.5h-1.5a.75.75 0 0 1 0-1.5h1.5v-1.5a.75.75 0 0 1 .75-.75Z" clipRule="evenodd" />
     </svg>
 );
 
-const Chatbot: React.FC<ChatbotProps> = ({ tracksToAnalyze, userProfile }) => {
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
+const Chatbot: React.FC<ChatbotProps> = ({ tracksToAnalyze, userProfile, onClose, isStandalone = false, onAddPlannedWorkout, isSidebar = false }) => {
+    const [messages, setMessages] = useState<ChatMessage[]>([] as ChatMessage[]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isPianificatoreLoading, setIsPianificatoreLoading] = useState(false);
+    const [isMaximized, setIsMaximized] = useState(false);
+    const [dims, setDims] = useState({ w: 400, h: 500 });
     const chatRef = useRef<Chat | null>(null);
     const scrollAreaRef = useRef<HTMLDivElement>(null);
+    const isResizing = useRef(false);
+    const resizeType = useRef<'both' | 'h' | 'v' | null>(null);
+    const CHAT_ID = 'global-coach';
     
     const getSystemInstruction = useCallback(() => {
-        let userContext = `Profilo Atleta: Età ${userProfile.age ?? 'N/D'}, FC Max ${userProfile.maxHr ?? 'N/D'} bpm, Obiettivo: ${userProfile.goal ?? 'Salute Generale'}. `;
-
-        // Analisi dello storico (ultime 10 corse)
+        const personality = userProfile.aiPersonality || 'pro_balanced';
+        const goalsStr = userProfile.goals?.length ? userProfile.goals.join(', ') : 'Salute Generale';
+        const today = new Date().toLocaleDateString('it-IT', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        let userContext = `Profilo Atleta: Età ${userProfile.age ?? 'N/D'}, FC Max ${userProfile.maxHr ?? 'N/D'} bpm, Obiettivi: ${goalsStr}. `;
+        if (userProfile.personalNotes) userContext += `\nNote Personali/Salute (Importanti): ${userProfile.personalNotes}`;
         const sortedTracks = [...tracksToAnalyze].sort((a, b) => b.points[0].time.getTime() - a.points[0].time.getTime());
         const last10 = sortedTracks.slice(0, 10);
-        
         let historyData = "Storico ultime sessioni:\n";
-        if (last10.length === 0) {
-            historyData += "- Nessuna corsa caricata ancora.";
-        } else {
+        if (last10.length === 0) historyData += "- Nessuna corsa caricata ancora.";
+        else {
             last10.forEach(t => {
                 const s = calculateTrackStats(t);
-                historyData += `- ${t.points[0].time.toLocaleDateString()}: ${t.distance.toFixed(2)}km, Passo ${formatPace(s.movingAvgPace)}/km\n`;
+                historyData += `- ${t.points[0].time.toLocaleDateString()}: ${t.distance.toFixed(2)}km, Passo ${formatPace(s.movingAvgPace)}/km. `;
+                if (t.notes) historyData += `Note Atleta: "${t.notes}"`;
+                historyData += `\n`;
             });
         }
-
-        return `Sei un Personal Running Coach AI. Il tuo compito è aiutare l'atleta a capire il suo stato di forma, monitorare i progressi e rispondere a domande tecniche sulla corsa.
-Utilizza i dati dello storico forniti per dare risposte precise e personalizzate. Se noti miglioramenti nel passo o nella costanza, sottolineali.
-Sii motivante ma professionale. Rispondi sempre in italiano.
-
-${userContext}
-
-${historyData}
-
-Conosci ora tutto dell'atleta. Rispondi alle sue domande basandoti su questi dati reali.`;
+        return `${personalityPrompts[personality]} Aiuta l'atleta a capire il suo stato di forma, monitorare i progressi e rispondere a domande tecniche. TIENI SEMPRE PRESENTE LA DATA ODIERNA: ${today}. HAI ACCESSO A TUTTA LA STORIA DELLE NOSTRE CONVERSAZIONI. Rispondi sempre in italiano. ${userContext} ${historyData}`;
     }, [tracksToAnalyze, userProfile]);
 
     useEffect(() => {
-        // Se cambiano le tracce o il profilo, resettiamo la sessione per aggiornare il contesto
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-        chatRef.current = ai.chats.create({
-            model: 'gemini-3-flash-preview',
-            config: { systemInstruction: getSystemInstruction() }
-        });
-        
-        if (messages.length === 0) {
-            setMessages([{ role: 'model', text: 'Ciao! Ho analizzato il tuo profilo e le tue ultime corse. Come posso aiutarti oggi nel tuo percorso di allenamento?' }]);
-        }
-    }, [getSystemInstruction]); // Riavvia sessione se cambiano i dati base
+        const initChat = async () => {
+            const savedMessages = await loadChatFromDB(CHAT_ID);
+            if (savedMessages && savedMessages.length > 0) setMessages(savedMessages);
+            else setMessages([{ role: 'model', text: 'Ciao! Sono il tuo Coach AI Globale. Ho analizzato il tuo profilo e le tue corse recenti. Cosa programmiamo per i prossimi giorni?' }]);
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            chatRef.current = ai.chats.create({
+                model: 'gemini-3-flash-preview',
+                config: { systemInstruction: getSystemInstruction() },
+                history: savedMessages?.map(m => ({ role: m.role, parts: [{ text: m.text }] })) || []
+            });
+        };
+        initChat();
+    }, [getSystemInstruction, CHAT_ID]);
 
     useEffect(() => {
-        if (scrollAreaRef.current) {
-            scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
-        }
-    }, [messages, isLoading]);
+        if (messages.length > 0) saveChatToDB(CHAT_ID, messages).catch(console.error);
+        if (scrollAreaRef.current) scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+    }, [messages, isLoading, CHAT_ID]);
 
-    const handleSend = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!input.trim() || isLoading || !chatRef.current) return;
-
-        const userText = input;
-        setInput('');
-        setMessages(prev => [...prev, { role: 'user', text: userText }]);
-        setIsLoading(true);
-
+    const performSendMessage = async (text: string) => {
+        if (!text.trim() || isLoading || !chatRef.current) return;
+        const userText = text;
+        setInput(''); setMessages(prev => [...prev, { role: 'user', text: userText }]); setIsLoading(true);
         try {
             const result = await chatRef.current.sendMessageStream({ message: userText });
             setMessages(prev => [...prev, { role: 'model', text: '' }]);
-
+            let fullResponse = '';
             for await (const chunk of result) {
-                const chunkText = chunk.text || '';
-                if (chunk.usageMetadata?.totalTokenCount) {
-                    window.gpxApp?.addTokens(chunk.usageMetadata.totalTokenCount);
-                }
-                
-                setMessages(prev => {
-                    const newMessages = [...prev];
-                    const lastIdx = newMessages.length - 1;
-                    if (newMessages[lastIdx].role === 'model') {
-                        newMessages[lastIdx] = { 
-                            ...newMessages[lastIdx], 
-                            text: newMessages[lastIdx].text + chunkText 
-                        };
-                    }
-                    return newMessages;
+                const c = chunk as GenerateContentResponse; fullResponse += c.text || '';
+                setMessages((prev: ChatMessage[]) => {
+                    const next = [...prev]; if (next.length > 0) { const last = next[next.length - 1]; if (last.role === 'model') last.text = fullResponse; }
+                    return next;
                 });
             }
-        } catch (error) {
-            console.error("Chat Error:", error);
-            setMessages(prev => [...prev, { role: 'model', text: "Spiacente, si è verificato un errore di connessione. Riprova tra poco." }]);
-        } finally {
-            setIsLoading(false);
-        }
+        } catch (error) { setMessages(prev => [...prev, { role: 'model', text: "Errore di connessione. Riprova." }]); } finally { setIsLoading(false); }
     };
 
+    const handleSend = (e: React.FormEvent) => { e.preventDefault(); performSendMessage(input); };
+
+    const handlePianificaAllenamento = async (lastResponse: string) => {
+        if (isPianificatoreLoading || !onAddPlannedWorkout) return;
+        setIsPianificatoreLoading(true);
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const today = new Date().toISOString().split('T')[0];
+            const prompt = `Analizza questa risposta di un coach AI e trasforma il suggerimento di allenamento in un oggetto JSON strutturato. Risposta: "${lastResponse}". Data odierna: ${today}.`;
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview', contents: prompt,
+                config: {
+                    responseMimeType: 'application/json',
+                    responseSchema: {
+                        type: Type.OBJECT,
+                        properties: {
+                            title: { type: Type.STRING }, description: { type: Type.STRING },
+                            date: { type: Type.STRING }, activityType: { type: Type.STRING, enum: ['Lento', 'Fartlek', 'Gara', 'Ripetute', 'Lungo', 'Altro'] }
+                        },
+                        required: ['title', 'description', 'date', 'activityType']
+                    }
+                }
+            });
+            const data = JSON.parse(response.text || '{}');
+            onAddPlannedWorkout({ id: `planned-${Date.now()}`, title: data.title, description: data.description, date: new Date(data.date), activityType: data.activityType as ActivityType, isAiSuggested: true });
+        } catch (e) { console.error(e); } finally { setIsPianificatoreLoading(false); }
+    };
+
+    const windowStyle: React.CSSProperties = isMaximized 
+        ? { position: 'fixed', top: 0, bottom: 0, left: 0, right: 0, width: 'auto', height: 'auto', zIndex: 6000, borderRadius: 0 }
+        : isSidebar 
+            ? { width: '100%', height: '100%', position: 'relative' }
+            : { width: `${dims.w}px`, height: `${dims.h}px`, position: 'relative', zIndex: 4000 };
+
     return (
-        <div className="h-full w-full flex flex-col bg-slate-800 text-white">
-            <header className="flex items-center p-3 border-b border-slate-700 bg-slate-900 flex-shrink-0">
-                <SparklesIcon />
-                <div className="ml-2">
-                    <h2 className="text-sm font-bold text-cyan-400 uppercase tracking-tighter">Coach AI Personale</h2>
-                    <p className="text-[10px] text-slate-500">Conosce i tuoi ultimi 10 allenamenti</p>
+        <div style={windowStyle} className={`flex flex-col bg-slate-800 text-white shadow-2xl overflow-hidden border border-slate-700 transition-all duration-300 ${!isMaximized && !isSidebar ? 'rounded-lg' : ''}`}>
+            <header className="flex items-center justify-between p-3 border-b border-slate-700 bg-slate-900 flex-shrink-0 cursor-default select-none">
+                <div className="flex items-center">
+                    <SparklesIcon />
+                    <div className="ml-2">
+                        <h2 className="text-sm font-bold text-cyan-400 uppercase tracking-tighter">Coach AI Globale</h2>
+                        <p className="text-[10px] text-slate-500">{userProfile.aiPersonality || 'Pro'}</p>
+                    </div>
+                </div>
+                <div className="flex items-center space-x-1">
+                    <button onClick={() => setIsMaximized(!isMaximized)} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors active:scale-90" title={isMaximized ? "Riduci" : "Tutto Schermo"}>
+                        {isMaximized ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M4.25 10a.75.75 0 0 0-1.5 0v4.25H7a.75.75 0 0 0 0-1.5H4.25V10ZM13 5.75a.75.75 0 0 0 0 1.5h2.75V10a.75.75 0 0 0 1.5 0V5.75H13Z" /><path d="M15.75 10a.75.75 0 0 1 1.5 0v4.25H13a.75.75 0 0 1 0-1.5h2.75V10ZM7 5.75a.75.75 0 0 1 0 1.5H4.25V10a.75.75 0 0 1-1.5 0V5.75H7Z" /></svg>
+                        ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M3.25 3A.75.75 0 0 1 4 3.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 3.25 3Zm3.5 0A.75.75 0 0 1 7.5 3.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 6.75 3ZM13.25 3a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Zm3.5 0a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75ZM3.25 13a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Zm3.5 0a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Zm6.5 0a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Zm3.5 0a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Z" clipRule="evenodd" /></svg>
+                        )}
+                    </button>
+                    {onClose && <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded transition-colors text-xl leading-none">&times;</button>}
                 </div>
             </header>
-
-            <div ref={scrollAreaRef} className="flex-grow p-4 overflow-y-auto space-y-4 custom-scrollbar">
+            <div ref={scrollAreaRef} className="flex-grow p-4 overflow-y-auto space-y-4 custom-scrollbar bg-slate-800/50">
                 {messages.map((msg, index) => (
-                    <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[90%] p-3 rounded-2xl ${
-                            msg.role === 'user' 
-                                ? 'bg-cyan-700 text-white rounded-br-none shadow-md' 
-                                : 'bg-slate-700 border border-slate-600 rounded-bl-none shadow-lg'
-                        }`}>
+                    <div key={index} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                        <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm ${msg.role === 'user' ? 'bg-cyan-700 text-white rounded-br-none' : 'bg-slate-700 border border-slate-600 rounded-bl-none'}`}>
                             <FormattedAnalysis text={msg.text} />
                         </div>
                     </div>
                 ))}
-                {isLoading && messages[messages.length-1]?.role === 'user' && (
-                    <div className="flex justify-start">
-                        <div className="p-3 bg-slate-700 border border-slate-600 rounded-2xl rounded-bl-none animate-pulse">
-                            <div className="flex space-x-1">
-                                <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full"></div>
-                                <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full delay-75"></div>
-                                <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full delay-150"></div>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                {isLoading && <div className="flex space-x-1 p-3 bg-slate-700 rounded-xl w-12 animate-pulse"><div className="w-1.5 h-1.5 bg-cyan-400 rounded-full"></div><div className="w-1.5 h-1.5 bg-cyan-400 rounded-full delay-75"></div><div className="w-1.5 h-1.5 bg-cyan-400 rounded-full delay-150"></div></div>}
             </div>
-
-            <form onSubmit={handleSend} className="p-3 border-t border-slate-700 bg-slate-900/50">
-                <div className="flex items-center bg-slate-700 rounded-xl px-2 border border-slate-600 focus-within:border-cyan-500/50 transition-colors">
-                    <input
-                        type="text"
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        placeholder="Chiedi al tuo coach..."
-                        className="w-full bg-transparent p-3 focus:outline-none text-sm placeholder-slate-500"
-                        disabled={isLoading}
-                    />
-                    <button 
-                        type="submit" 
-                        disabled={isLoading || !input.trim()} 
-                        className="p-2 text-cyan-400 hover:text-cyan-300 disabled:opacity-30 transition-colors"
-                    >
-                        <SendIcon />
-                    </button>
+            <div className="p-3 border-t border-slate-700 bg-slate-900/50 flex-shrink-0">
+                <div className="flex gap-2 overflow-x-auto pb-3 no-scrollbar scroll-smooth">
+                    {SUGGESTIONS.map((suggestion, i) => (<button key={i} onClick={() => performSendMessage(suggestion)} disabled={isLoading} className="whitespace-nowrap px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full text-[10px] sm:text-xs text-slate-300 hover:bg-slate-700 hover:border-cyan-500 transition-all disabled:opacity-50 active:scale-95">{suggestion}</button>))}
                 </div>
-            </form>
+                <form onSubmit={handleSend} className="flex items-center bg-slate-700 rounded-xl px-2 border border-slate-600 focus-within:border-cyan-500 shadow-inner">
+                    <input type="text" value={input} onChange={e => setInput(e.target.value)} placeholder="Fai una domanda al coach..." className="w-full bg-transparent p-3 focus:outline-none text-sm placeholder-slate-500" disabled={isLoading} />
+                    <button type="submit" disabled={isLoading || !input.trim()} className="p-2 text-cyan-400 hover:text-cyan-300 transition-transform active:scale-90">🚀</button>
+                </form>
+            </div>
         </div>
     );
 };

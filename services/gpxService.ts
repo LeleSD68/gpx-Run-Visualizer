@@ -1,3 +1,4 @@
+
 import { TrackPoint } from '../types';
 import { smoothElevation } from './dataProcessingService';
 
@@ -42,7 +43,8 @@ export const parseGpx = (gpxString: string, fileName: string): { name: string; p
       const lon = pt.getAttribute("lon");
       const ele = pt.querySelector("ele")?.textContent;
       const time = pt.querySelector("time")?.textContent;
-      const hr = pt.querySelector("hr")?.textContent;
+      const hr = pt.querySelector("hr")?.textContent || pt.querySelector("HeartRateBpm Value")?.textContent;
+      const cad = pt.querySelector("cad")?.textContent || pt.querySelector("cadence")?.textContent;
 
       if (lat && lon && time) {
         const pointData: Omit<TrackPoint, 'cummulativeDistance'> = {
@@ -53,6 +55,9 @@ export const parseGpx = (gpxString: string, fileName: string): { name: string; p
         };
         if (hr) {
             pointData.hr = parseInt(hr, 10);
+        }
+        if (cad) {
+            pointData.cad = parseInt(cad, 10);
         }
         points.push(pointData);
       }

@@ -19,7 +19,7 @@ interface TimelineChartProps {
     smoothingWindow?: number;
 }
 
-const metricInfo: Record<YAxisMetric, { label: string, color: string, formatter: (v: number) => string }> = {
+const metricInfo: Record<string, { label: string, color: string, formatter: (v: number) => string }> = {
     pace: {
         label: 'Ritmo',
         color: '#06b6d4', // cyan-500
@@ -27,7 +27,7 @@ const metricInfo: Record<YAxisMetric, { label: string, color: string, formatter:
             if (!isFinite(pace) || pace <= 0) return '--:--';
             const minutes = Math.floor(pace);
             const seconds = Math.round((pace - minutes) * 60);
-            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            return `${minutes}:${seconds.toString().padStart(2, '0')} /km`;
         },
     },
     elevation: {
@@ -38,12 +38,17 @@ const metricInfo: Record<YAxisMetric, { label: string, color: string, formatter:
     speed: {
         label: 'Velocità',
         color: '#f97316', // orange-500
-        formatter: (speed) => `${speed.toFixed(1)}km/h`,
+        formatter: (speed) => `${speed.toFixed(1)} km/h`,
     },
     hr: {
         label: 'FC',
         color: '#ef4444', // red-500
-        formatter: (hr) => `${hr.toFixed(0)}bpm`,
+        formatter: (hr) => `${Math.round(hr)} bpm`,
+    },
+    cad: {
+        label: 'Passi',
+        color: '#a855f7', // purple-500
+        formatter: (cad) => `${Math.round(cad)} spm`,
     },
 };
 
@@ -77,11 +82,11 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
         if (!track || track.points.length < 2) return [];
 
         return track.points.map((p, i) => {
-            const values: { [key in YAxisMetric]?: number | null } = {};
+            const values: { [key: string]: number | null } = {};
             values.elevation = p.ele;
             values.hr = p.hr ?? null;
+            values.cad = p.cad ?? null;
             
-            // Pace and Speed are now derived using the smoothing window
             const { speed, pace } = calculateSmoothedMetrics(track.points, i, smoothingWindow);
             values.speed = speed;
             values.pace = pace > 0 ? pace : null;
@@ -94,12 +99,12 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
         const domains: any = {};
         if (pointsWithAllData.length < 2) return domains;
 
-        for (const metric of Object.keys(metricInfo) as YAxisMetric[]) {
+        for (const metric of Object.keys(metricInfo) as string[]) {
             const validValues = pointsWithAllData.map(p => p.values[metric]).filter((v): v is number => v !== null && v !== undefined && isFinite(v));
             if (validValues.length > 0) {
                 let min = Math.min(...validValues);
                 let max = Math.max(...validValues);
-                if (metric === 'pace') max = Math.min(max, 20); // Cap pace a 20 min/km
+                if (metric === 'pace') max = Math.min(max, 20); 
                 if (metric === 'speed') min = Math.max(min, 0); 
                 
                 const range = max - min;
@@ -139,7 +144,7 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
         const hoveredX = hoveredPoint ? xScale(hoveredPoint.cummulativeDistance) : null;
         const selectedX = selectedPoint ? xScale(selectedPoint.cummulativeDistance) : null;
 
-        let hoveredValues: { [key in YAxisMetric]?: number | null } | null = null;
+        let hoveredValues: { [key: string]: number | null } | null = null;
         if (hoveredPoint) {
             const dataPoint = pointsWithAllData.find(p => p.time.getTime() === hoveredPoint.time.getTime());
             if (dataPoint) {
@@ -192,8 +197,15 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
             setViewRange({ min: newMin, max: newMax });
 
         } else if (isDragging) {
+            // Update selection rectangle
             setSelection(s => s ? { ...s, end: e.clientX } : null);
+            
+            // Also update the hover cursor on map for precision during selection
+            const distance = getDistanceAtX(e.clientX);
+            const point = getTrackPointAtDistance(track, distance);
+            onChartHover(point);
         } else {
+            // Standard hover
             const distance = getDistanceAtX(e.clientX);
             const point = getTrackPointAtDistance(track, distance);
             onChartHover(point);
@@ -205,7 +217,6 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
             const startDistance = getDistanceAtX(selection.start);
             const endDistance = getDistanceAtX(selection.end);
             if (Math.abs(endDistance - startDistance) < 0.01) { // less than 10m
-                setSelection(null);
                 onSelectionChange(null);
             } else {
                 onSelectionChange({
@@ -213,6 +224,8 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                     endDistance: Math.max(startDistance, endDistance)
                 });
             }
+            // Clear internal selection so that parent component controls the highlighting via highlightedRange prop
+            setSelection(null);
         }
         setIsDragging(false);
         setIsPanning(false);
@@ -220,7 +233,9 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
     };
 
     const handleMouseLeave = () => {
-        handleMouseUp();
+        if (isDragging) {
+            handleMouseUp();
+        }
         onChartHover(null);
     };
 
@@ -257,15 +272,29 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
         setViewRange({ min: 0, max: track.distance });
     };
     
-    const selectionRect = useMemo(() => {
-        if (!selection || !onSelectionChange) return null;
-        const startX = xScale(getDistanceAtX(selection.start));
-        const endX = xScale(getDistanceAtX(selection.end));
-        return {
-            x: Math.min(startX, endX),
-            width: Math.abs(endX - startX),
+    // Use selection if dragging, otherwise check highlightedRange
+    const displaySelection = useMemo(() => {
+        if (selection) {
+            const startX = xScale(getDistanceAtX(selection.start));
+            const endX = xScale(getDistanceAtX(selection.end));
+            return {
+                x: Math.min(startX, endX),
+                width: Math.abs(endX - startX),
+                color: 'rgba(255,255,255,0.2)',
+                stroke: 'rgba(255,255,255,0.5)'
+            };
+        } else if (highlightedRange) {
+            const startX = xScale(highlightedRange.startDistance);
+            const endX = xScale(highlightedRange.endDistance);
+            return {
+                x: Math.min(startX, endX),
+                width: Math.abs(endX - startX),
+                color: 'rgba(14, 165, 233, 0.2)',
+                stroke: 'rgba(14, 165, 233, 0.5)'
+            }
         }
-    }, [selection, xScale, getDistanceAtX, onSelectionChange]);
+        return null;
+    }, [selection, highlightedRange, xScale, getDistanceAtX]);
     
     const isZoomed = viewRange.min > 0 || viewRange.max < track.distance;
 
@@ -332,14 +361,14 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                         );
                     })}
 
-                    {highlightedRange && (
+                    {displaySelection && (
                         <rect
-                            x={xScale(highlightedRange.startDistance)}
+                            x={displaySelection.x}
                             y={0}
-                            width={xScale(highlightedRange.endDistance) - xScale(highlightedRange.startDistance)}
+                            width={displaySelection.width}
                             height={height}
-                            fill="rgba(14, 165, 233, 0.2)"
-                            stroke="rgba(14, 165, 233, 0.5)"
+                            fill={displaySelection.color}
+                            stroke={displaySelection.stroke}
                             strokeWidth="1"
                             className="pointer-events-none"
                         />
@@ -351,20 +380,20 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
 
                         const domainRange = domain.max - domain.min;
 
-                        const linePath = pointsWithAllData
+                        const linePoints = pointsWithAllData
                             .map(p => {
                                 const value = p.values[metric];
                                 if (value === null || value === undefined) return null;
                                 let ratio = domainRange > 0 ? (value - domain.min) / domainRange : 0.5;
-                                if (metric === 'pace') ratio = 1 - ratio; // Invert pace
-                                return `${xScale(p.cummulativeDistance)},${yScale(ratio)}`;
+                                if (metric === 'pace') ratio = 1 - ratio; 
+                                return { x: xScale(p.cummulativeDistance), y: yScale(ratio) };
                             })
-                            .filter(Boolean)
-                            .join(' ');
+                            .filter((pt): pt is {x: number, y: number} => pt !== null);
 
-                        if (!linePath) return null;
-
-                        const fillPath = `M${linePath} V${height} H${xScale(pointsWithAllData[0].cummulativeDistance)} Z`;
+                        if (linePoints.length < 2) return null;
+                        
+                        const linePath = linePoints.map(pt => `${pt.x},${pt.y}`).join(' ');
+                        const fillPath = `M${linePath} V${height} H${linePoints[0].x} Z`;
                         const isPrimaryMetric = metricIndex === 0;
 
                         return (
@@ -386,18 +415,6 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                         }
                         return null;
                     })}
-
-                    {selectionRect && (
-                        <rect
-                            x={selectionRect.x}
-                            y={0}
-                            width={selectionRect.width}
-                            height={height}
-                            fill="rgba(255,255,255,0.2)"
-                            stroke="rgba(255,255,255,0.5)"
-                            strokeWidth="1"
-                        />
-                    )}
                     
                     {selectedX !== null && selectedPoint && selectedX >= 0 && selectedX <= width && (
                          <line
@@ -419,21 +436,24 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                                 strokeDasharray="3,3"
                             />
                             
-                            <g transform={`translate(${hoveredX + 15 + 130 > width ? hoveredX - 145 : hoveredX + 15}, 5)`}>
+                            {/* Unified Multi-Metric Tooltip */}
+                            <g transform={`translate(${hoveredX + 15 + 140 > width ? hoveredX - 155 : hoveredX + 15}, 5)`}>
                                 <rect 
-                                    x="0" y="0" width="130" height={20 + yAxisMetrics.length * 16} rx="4"
-                                    fill="rgba(17, 24, 39, 0.9)"
-                                    stroke="#475569"
+                                    x="0" y="0" width="140" height={22 + (['pace', 'elevation', 'speed', 'hr', 'cad'].filter(m => hoveredValues[m] !== null).length * 16)} rx="6"
+                                    fill="rgba(15, 23, 42, 0.95)"
+                                    stroke="#334155"
+                                    strokeWidth="1"
+                                    className="shadow-2xl"
                                 />
-                                <text x="10" y="18" fill="#f1f5f9" fontSize="12" fontWeight="bold">
-                                    Dist: {hoveredPoint.cummulativeDistance.toFixed(2)} km
+                                <text x="10" y="18" fill="#f1f5f9" fontSize="11" fontWeight="bold" className="uppercase tracking-tight">
+                                    Km: {hoveredPoint.cummulativeDistance.toFixed(2)}
                                 </text>
-                                {yAxisMetrics.map((metric, i) => {
-                                    const value = hoveredValues[metric];
+                                {['pace', 'elevation', 'speed', 'hr', 'cad'].filter(m => hoveredValues[m] !== null).map((metric, i) => {
+                                    const value = hoveredValues[metric] as number;
                                     const info = metricInfo[metric];
                                     return (
-                                        <text key={metric} x="10" y={34 + i * 16} fill={info.color} fontSize="12" fontWeight="500">
-                                           {info.label}: {value !== null && value !== undefined ? info.formatter(value) : 'N/A'}
+                                        <text key={metric} x="10" y={34 + i * 16} fill={info.color} fontSize="11" fontWeight="600">
+                                           {info.label}: <tspan fill="#fff">{info.formatter(value)}</tspan>
                                         </text>
                                     )
                                 })}
@@ -455,14 +475,14 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                     )}
                 </g>
             </svg>
-            <div className="absolute bottom-0 right-2 text-xs text-slate-500 pointer-events-none">
+            <div className="absolute bottom-0 right-2 text-[9px] text-slate-500 pointer-events-none uppercase font-bold tracking-widest">
                 {isZoomed ? 'Shift+Drag: Pan / ' : ''}
                 {onSelectionChange && 'Drag: Selezione'}
             </div>
             {isZoomed && (
                 <button 
                     onClick={resetZoom}
-                    className="absolute top-1 right-2 bg-slate-600/50 hover:bg-slate-500/80 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute top-1 right-2 bg-slate-700/80 hover:bg-cyan-600 text-white text-[10px] font-bold py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity border border-slate-600"
                 >
                     Reset Zoom
                 </button>

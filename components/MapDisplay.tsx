@@ -1,16 +1,41 @@
+
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { Track, RaceRunner, MapDisplayProps, TrackPoint, PauseSegment, TrackStats, Split, AiSegment } from '../types';
 import { calculateTrackStats } from '../services/trackStatsService';
 import { getTrackPointAtDistance, getPointsInDistanceRange } from '../services/trackEditorUtils';
-import { getTrackSegmentColors, ColoredSegment } from '../services/colorService';
-import TrackPreview from './TrackPreview';
+import { getTrackSegmentColors, ColoredSegment, GradientMetric } from '../services/colorService';
 import AnimationControls from './AnimationControls';
+import Tooltip from './Tooltip';
 
-declare const L: any; // Use Leaflet from CDN
+declare const L: any; 
 
 const FitBoundsIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path d="M2.5 3.5A1 1 0 0 1 3.5 2.5h2.25a.75.75 0 0 0 0-1.5H3.5A2.5 2.5 0 0 0 1 3.5v2.25a.75.75 0 0 0 1.5 0V3.5ZM17.5 3.5V5.75a.75.75 0 0 0 1.5 0V3.5A2.5 2.5 0 0 0 16.5 1h-2.25a.75.75 0 0 0 0 1.5H16.5A1 1 0 0 1 17.5 3.5ZM2.5 16.5A1 1 0 0 1 3.5 17.5h2.25a.75.75 0 0 0 0 1.5H3.5A2.5 2.5 0 0 0 1 16.5v-2.25a.75.75 0 0 0 1.5 0V16.5ZM16.5 19a2.5 2.5 0 0 0 2.5-2.5v-2.25a.75.75 0 0 0-1.5 0V16.5a1 1 0 0 1-1 1h-2.25a.75.75 0 0 0 0 1.5H16.5Z" />
+        <path d="M2.5 3.5A1 1 0 0 1 3.5 2.5h2.25a.75.75 0 0 0 0-1.5H3.5A2.5 2.5 0 0 0 1 3.5v2.25a.75.75 0 0 0 1.5 0V3.5ZM17.5 3.5V5.75a.75.75 0 0 0 1.5 0V3.5A2.5 2.5 0 0 0 16.5 1h-2.25a.75.75 0 0 0 0 1.5H16.5A1 1 0 0 1 17.5 3.5ZM2.5 16.5A1 1 0 0 1 3.5 17.5h2.25a.75.75 0 0 0 0-1.5H3.5A2.5 2.5 0 0 0 1 16.5v-2.25a.75.75 0 0 0-1.5 0V16.5a1 1 0 0 1-1 1h-2.25a.75.75 0 0 0 0 1.5H16.5Z" />
+    </svg>
+);
+
+const SunIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+        <path d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2ZM10 15a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15ZM15.657 4.343a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM5.404 14.596a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.061 0ZM18 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 18 10ZM4.25 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 .75 10ZM15.657 15.657a.75.75 0 0 1-1.06 0l-1.061-1.06a.75.75 0 1 1 1.06-1.061l1.061 1.06a.75.75 0 0 1 0 1.061ZM5.404 5.404a.75.75 0 0 1-1.06 0L3.283 4.343a.75.75 0 1 1 1.06-1.06l1.061 1.061a.75.75 0 0 1 0 1.06ZM10 6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" />
+    </svg>
+);
+
+const MoonIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+        <path fillRule="evenodd" d="M7.455 2.67A6.25 6.25 0 0 1 15.33 10.544 6.252 6.252 0 0 0 7.454 2.67ZM10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z" clipRule="evenodd" />
+    </svg>
+);
+
+const ZoomInIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+        <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+    </svg>
+);
+
+const ZoomOutIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+        <path fillRule="evenodd" d="M4.25 10a.75.75 0 0 1 .75-.75h10a.75.75 0 0 1 0 1.5H5a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
     </svg>
 );
 
@@ -19,36 +44,54 @@ interface AnimationStats {
     pace: string;
     elevation: number;
     hr: number | null;
+    distance: number;
 }
 
-const StatsDisplay: React.FC<{ stats: AnimationStats }> = ({ stats }) => (
-    <div className="absolute top-4 left-4 bg-slate-800/80 backdrop-blur-sm p-3 rounded-lg shadow-lg text-white grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 z-[1000]">
-        <div>
-            <div className="text-xs text-slate-400">Time</div>
-            <div className="text-xl font-bold font-mono">{stats.time}</div>
-        </div>
-        <div>
-            <div className="text-xs text-slate-400">Avg. Pace (/km)</div>
-            <div className="text-xl font-bold font-mono">{stats.pace}</div>
-        </div>
-        <div>
-            <div className="text-xs text-slate-400">Elevation</div>
-            <div className="text-xl font-bold font-mono">{stats.elevation} m</div>
-        </div>
-        {stats.hr !== null && (
-             <div>
-                <div className="text-xs text-slate-400">Heart Rate</div>
-                <div className="text-xl font-bold font-mono">{stats.hr} bpm</div>
-            </div>
-        )}
-    </div>
-);
+const StatsDisplay: React.FC<{ stats: AnimationStats, splits: Split[], currentDistance: number, visibleMetrics: Set<string> }> = ({ stats, splits, currentDistance, visibleMetrics }) => {
+    const showHr = visibleMetrics.has('hr') && stats.hr !== null;
+    const showTime = visibleMetrics.has('time');
+    const showPace = visibleMetrics.has('pace');
+    const showElevation = visibleMetrics.has('elevation');
+    const activeMetricsCount = 1 + (showTime ? 1 : 0) + (showPace ? 1 : 0) + (showElevation ? 1 : 0) + (showHr ? 1 : 0);
 
+    return (
+        <div className="absolute top-0 left-0 right-0 sm:top-4 sm:left-4 sm:right-auto bg-slate-800/95 sm:bg-slate-800/90 backdrop-blur-md p-3 sm:p-4 rounded-b-xl sm:rounded-xl shadow-2xl text-white z-[1000] border-b sm:border border-slate-600 w-full sm:w-auto sm:max-w-lg transition-all duration-300">
+            <div className="grid gap-x-4 gap-y-2" style={{ gridTemplateColumns: `repeat(${activeMetricsCount}, minmax(0, 1fr))` }}>
+                <div>
+                    <div className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold">Distanza</div>
+                    <div className="text-base sm:text-xl font-bold font-mono">{stats.distance.toFixed(2)} <span className="text-[10px] sm:text-sm text-slate-500">km</span></div>
+                </div>
+                {showTime && (
+                    <div>
+                        <div className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold">Tempo</div>
+                        <div className="text-base sm:text-xl font-bold font-mono">{stats.time}</div>
+                    </div>
+                )}
+                {showPace && (
+                    <div>
+                        <div className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold">Ritmo</div>
+                        <div className="text-base sm:text-xl font-bold font-mono">{stats.pace}</div>
+                    </div>
+                )}
+                {showElevation && (
+                    <div>
+                        <div className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold">Elev.</div>
+                        <div className="text-base sm:text-xl font-bold font-mono">{stats.elevation} m</div>
+                    </div>
+                )}
+                {showHr && (
+                     <div>
+                        <div className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold">FC</div>
+                        <div className="text-base sm:text-xl font-bold font-mono text-red-400">{Math.round(stats.hr!)} <span className="text-[10px] sm:text-sm text-slate-500">bpm</span></div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
 
 const formatPaceFromSpeed = (speedKmh: number): string => {
-    if (speedKmh < 0.1) {
-        return '--:-- /km';
-    }
+    if (speedKmh < 0.1) return '--:-- /km';
     const paceInMinutes = 60 / speedKmh;
     const minutes = Math.floor(paceInMinutes);
     const seconds = Math.round((paceInMinutes - minutes) * 60);
@@ -64,1274 +107,390 @@ const formatDuration = (ms: number) => {
 };
 
 const formatPace = (pace: number) => {
-    if (!isFinite(pace) || pace <= 0) {
-        return '--:-- /km';
-    }
+    if (!isFinite(pace) || pace <= 0) return '--:--';
     const minutes = Math.floor(pace);
     const seconds = Math.round((pace - minutes) * 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')} /km`;
-};
-
-const formatSplitDuration = (ms: number) => {
-    const totalSeconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
+const isValidLatLng = (lat: any, lng: any) => typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng);
 
 const MapDisplay: React.FC<MapDisplayProps> = ({ 
     tracks, visibleTrackIds, raceRunners, hoveredTrackId, runnerSpeeds, 
-    selectionPoints, hoveredPoint, pauseSegments, showPauses, onMapHover, 
-    onPauseClick, mapGradientMetric, coloredPauseSegments, animationTrack, 
+    selectionPoints, hoveredPoint, pauseSegments, showPauses, onMapHover, onTrackHover,
+    onPauseClick, mapGradientMetric = 'none', coloredPauseSegments, animationTrack, 
     animationProgress = 0, onExitAnimation, fastestSplitForAnimation, animationHighlight,
     isAnimationPlaying, onToggleAnimationPlay, onAnimationProgressChange,
     animationSpeed, onAnimationSpeedChange, fitBoundsCounter = 0,
     selectedPoint, onPointClick, hoveredLegendValue, aiSegmentHighlight,
-    showSummaryMode, isRecording, onStartRecording, onStopRecording
+    showSummaryMode
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
+  const tileLayerRef = useRef<any>(null);
   const polylinesRef = useRef<Map<string, any>>(new Map());
-  const raceMarkersRef = useRef<Map<string, any>>(new Map());
-  const selectionPolylineRef = useRef<any>(null);
-  const hoverMarkerRef = useRef<any>(null);
-  const pauseMarkersLayerRef = useRef<any>(null);
-  const pausePolylinesLayerRef = useRef<any>(null);
-  const elevationLayerRef = useRef<any>(null);
-  const legendControlRef = useRef<any>(null);
-  const hiddenPolylineIdRef = useRef<string | null>(null);
-  const [hoveredTrack, setHoveredTrack] = useState<Track | null>(null);
-  const [hoveredTrackStats, setHoveredTrackStats] = useState<TrackStats | null>(null);
-  const animationMarkerRef = useRef<any>(null);
-  
-  // New refs for the split animation trail (History + Active Tail)
-  const animationHistoryPolylineRef = useRef<any>(null);
-  const animationTailLayerRef = useRef<any>(null);
-
-  // Use a Map to store marker references for each km
-  const kmMarkersRef = useRef<Map<number, any>>(new Map());
+  const raceFaintPolylinesRef = useRef<Map<string, any>>(new Map());
+  const raceRunnerMarkersRef = useRef<Map<string, any>>(new Map());
   const kmMarkersLayerGroupRef = useRef<any>(null);
+  const hoverMarkerRef = useRef<any>(null);
+  const animationMarkerRef = useRef<any>(null);
+  const aiSegmentPolylineRef = useRef<any>(null);
+  const selectionPolylineRef = useRef<any>(null);
 
   const [isAutoFitEnabled, setIsAutoFitEnabled] = useState(true);
-  const selectedPointPopupRef = useRef<any>(null);
-  const legendMarkerRef = useRef<HTMLDivElement | null>(null);
-  const [legendRange, setLegendRange] = useState<{ min: number, max: number } | null>(null);
-  const aiSegmentPolylineRef = useRef<any>(null);
-
+  const [mapTheme, setMapTheme] = useState<'dark' | 'light'>('dark');
+  const [visibleMetrics, setVisibleMetrics] = useState<Set<string>>(new Set(['time', 'pace', 'elevation', 'hr']));
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
-    if (hoveredTrackId) {
-        const track = tracks.find(t => t.id === hoveredTrackId);
-        if (track && track.points.length > 0) {
-            setHoveredTrack(track);
-            setHoveredTrackStats(calculateTrackStats(track));
-        } else {
-            setHoveredTrack(null);
-            setHoveredTrackStats(null);
-        }
-    } else {
-        setHoveredTrack(null);
-        setHoveredTrackStats(null);
-    }
-  }, [hoveredTrackId, tracks]);
-
-
-  useEffect(() => {
-    if (mapContainerRef.current && !mapRef.current) {
-      // Initialize map with a fallback location
-      mapRef.current = L.map(mapContainerRef.current, { preferCanvas: true }).setView([45.60, 12.88], 13);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 20
-      }).addTo(mapRef.current);
-
-      // Disable auto-fit on manual interaction
-      mapRef.current.on('dragstart zoomstart', () => {
-          setIsAutoFitEnabled(false);
-      });
-    }
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Effect for drawing/updating polylines
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    
-    // During animation, hide race markers and all standard track polylines.
-    // The animation is drawn in a separate effect.
-    if (animationTrack) {
-        raceMarkersRef.current.forEach(marker => map.removeLayer(marker));
-        raceMarkersRef.current.clear();
-        polylinesRef.current.forEach(polyline => map.removeLayer(polyline));
-        polylinesRef.current.clear();
-        return; // Prevent drawing any standard polylines.
+  const animationTrackStats = useMemo(() => animationTrack ? calculateTrackStats(animationTrack) : null, [animationTrack]);
+
+  const animationStats = useMemo((): AnimationStats => {
+    if (!animationTrack) return { time: '00:00:00', pace: '--:-- /km', elevation: 0, hr: null, distance: 0 };
+    const point = getTrackPointAtDistance(animationTrack, animationProgress);
+    if (!point) return { time: '00:00:00', pace: '--:-- /km', elevation: 0, hr: null, distance: animationProgress };
+    const elapsedMs = point.time.getTime() - animationTrack.points[0].time.getTime();
+    let currentPace = '--:-- /km';
+    if (animationProgress > 0.01 && elapsedMs > 0) {
+        const speedKmh = animationProgress / (elapsedMs / 3600000);
+        if (speedKmh > 0.1) currentPace = formatPaceFromSpeed(speedKmh);
     }
+    return { time: formatDuration(elapsedMs), pace: currentPace, elevation: Math.round(point.ele), hr: point.hr || null, distance: animationProgress };
+  }, [animationTrack, animationProgress]);
 
-    const visibleTracks = tracks.filter(t => visibleTrackIds.has(t.id));
-    
-    // Remove old polylines
-    polylinesRef.current.forEach((polyline, id) => {
-      if (!visibleTrackIds.has(id)) {
-        map.removeLayer(polyline);
-        polylinesRef.current.delete(id);
-      }
-    });
+  const handleToggleMetric = useCallback((metric: string) => {
+      setVisibleMetrics(prev => {
+          const next = new Set(prev);
+          if (next.has(metric)) next.delete(metric);
+          else next.add(metric);
+          return next;
+      });
+  }, []);
 
-    // Add new polylines
-    visibleTracks.forEach(track => {
-      if (!polylinesRef.current.has(track.id)) {
-        const latlngs = track.points.map(p => [p.lat, p.lon]);
-        const polyline = L.polyline(latlngs, { color: track.color, weight: 3, opacity: 0.7 }).addTo(map);
-        
-        // Add hover listeners if the callback is provided (i.e., in editor view)
-        if (onMapHover) {
-            polyline.on('mousemove', (e: any) => {
-                let closestPoint: TrackPoint | null = null;
-                let minDistance = Infinity;
-
-                // Find the closest point on the track to the mouse cursor
-                track.points.forEach(p => {
-                    const dist = map.distance(e.latlng, L.latLng(p.lat, p.lon));
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        closestPoint = p;
-                    }
-                });
-                
-                if (closestPoint) {
-                    onMapHover(closestPoint);
-                }
-            });
-
-            polyline.on('mouseout', () => {
-                onMapHover(null);
-            });
-        }
-        
-        if (onPointClick) {
-            polyline.on('click', (e: any) => {
-                let closestPoint: TrackPoint | null = null;
-                let minDistance = Infinity;
-
-                track.points.forEach(p => {
-                    const dist = map.distance(e.latlng, L.latLng(p.lat, p.lon));
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        closestPoint = p;
-                    }
-                });
-                
-                if (closestPoint) {
-                    onPointClick(closestPoint);
-                }
-            });
-        }
-
-        polylinesRef.current.set(track.id, polyline);
-      }
-    });
-  }, [tracks, visibleTrackIds, onMapHover, onPointClick, animationTrack]);
-
-  const visibleTrackIdsKey = useMemo(() => {
-      return [...visibleTrackIds].sort().join(',');
-  }, [visibleTrackIds]);
-
+  // Bounds Fitting
   const fitMapToBounds = useCallback(() => {
       const map = mapRef.current;
       if (!map) return;
-
       let bounds: any = null;
-      
-      const currentAnimationTrack = animationTrack;
-      
-      if (currentAnimationTrack) {
-        const allPoints = currentAnimationTrack.points.map(p => [p.lat, p.lon]);
-         if (allPoints.length > 0) {
-            bounds = L.latLngBounds(allPoints);
-         }
-      } else if (aiSegmentHighlight) {
-          const track = tracks[0]; // Assuming detail view has only one track
-          if (track) {
-              const points = getPointsInDistanceRange(track, aiSegmentHighlight.startDistance, aiSegmentHighlight.endDistance);
-              if (points.length > 1) {
-                  bounds = L.latLngBounds(points.map(p => [p.lat, p.lon]));
-              }
-          }
+      if (animationTrack) {
+        const allPoints = animationTrack.points.filter(p => isValidLatLng(p.lat, p.lon)).map(p => [p.lat, p.lon]);
+        if (allPoints.length > 0) bounds = L.latLngBounds(allPoints);
+      } else if (aiSegmentHighlight && tracks[0]) {
+          const points = getPointsInDistanceRange(tracks[0], aiSegmentHighlight.startDistance, aiSegmentHighlight.endDistance).filter(p => isValidLatLng(p.lat, p.lon));
+          if (points.length > 1) bounds = L.latLngBounds(points.map(p => [p.lat, p.lon]));
       } else if (selectionPoints && selectionPoints.length > 1) {
-          const latlngs = selectionPoints.map(p => [p.lat, p.lon]);
-          bounds = L.latLngBounds(latlngs);
+          bounds = L.latLngBounds(selectionPoints.filter(p => isValidLatLng(p.lat, p.lon)).map(p => [p.lat, p.lon]));
       } else {
           const visibleTracks = tracks.filter(t => visibleTrackIds.has(t.id));
           if (visibleTracks.length > 0) {
-              const allPoints = visibleTracks.flatMap(t => t.points.map(p => [p.lat, p.lon]));
-              if (allPoints.length > 0) {
-                  bounds = L.latLngBounds(allPoints);
-              }
-          } else if (tracks.length > 0) {
-              // Fallback: if no tracks are visible, fit all loaded tracks
-              const allPoints = tracks.flatMap(t => t.points.map(p => [p.lat, p.lon]));
-              if (allPoints.length > 0) {
-                  bounds = L.latLngBounds(allPoints);
-              }
+              const allPoints = visibleTracks.flatMap(t => t.points.filter(p => isValidLatLng(p.lat, p.lon)).map(p => [p.lat, p.lon]));
+              if (allPoints.length > 0) bounds = L.latLngBounds(allPoints);
           }
       }
-
-      if (bounds && bounds.isValid()) {
-          map.fitBounds(bounds, { padding: [50, 50] });
-      }
+      if (bounds && bounds.isValid()) map.fitBounds(bounds, { padding: [20, 20] });
   }, [selectionPoints, tracks, visibleTrackIds, animationTrack, aiSegmentHighlight]);
 
-  // Effect to fit bounds when entering summary mode
+  // Initialize Map and Resize Observer
   useEffect(() => {
-      if (showSummaryMode && animationTrack) {
-          fitMapToBounds();
-      }
-  }, [showSummaryMode, animationTrack, fitMapToBounds]);
+    if (mapContainerRef.current && !mapRef.current) {
+      mapRef.current = L.map(mapContainerRef.current, { 
+        preferCanvas: true,
+        zoomControl: false // Disabilitiamo lo zoom nativo per gestirlo noi in modo centrato su mobile
+      }).setView([45.60, 12.88], 13);
+      
+      const tileUrl = mapTheme === 'light' ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png' : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+      tileLayerRef.current = L.tileLayer(tileUrl, { attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 20 }).addTo(mapRef.current);
+      mapRef.current.on('dragstart zoomstart', () => setIsAutoFitEnabled(false));
+      kmMarkersLayerGroupRef.current = L.layerGroup().addTo(mapRef.current);
 
-  // Effect for auto-fitting map bounds
-  useEffect(() => {
-    if (isAutoFitEnabled && !raceRunners && !animationTrack && !showSummaryMode) {
-      fitMapToBounds();
+      // Add resize observer to trigger Leaflet invalidateSize when panel resizes
+      const resizeObserver = new ResizeObserver(() => {
+          if (mapRef.current) {
+              mapRef.current.invalidateSize();
+              if (isAutoFitEnabled) fitMapToBounds();
+          }
+      });
+      resizeObserver.observe(mapContainerRef.current);
+      return () => resizeObserver.disconnect();
     }
-  }, [isAutoFitEnabled, fitMapToBounds, raceRunners, animationTrack, visibleTrackIdsKey, showSummaryMode]);
+  }, [fitMapToBounds, isAutoFitEnabled]);
 
-  // Effect to programmatically trigger fitMapToBounds
+  // Update Theme
   useEffect(() => {
-      if (fitBoundsCounter > 0) {
-          fitMapToBounds();
+      if (mapRef.current && tileLayerRef.current) {
+          const tileUrl = mapTheme === 'light' ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png' : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+          tileLayerRef.current.setUrl(tileUrl);
       }
-  }, [fitBoundsCounter, fitMapToBounds]);
+  }, [mapTheme]);
 
-  const handleToggleAutoFit = useCallback(() => {
-    const willBeEnabled = !isAutoFitEnabled;
-    setIsAutoFitEnabled(willBeEnabled);
-    if (willBeEnabled) {
-        fitMapToBounds();
-    }
-  }, [isAutoFitEnabled, fitMapToBounds]);
-
-
-  // Effect for highlighting hovered track
-  useEffect(() => {
-    polylinesRef.current.forEach((polyline, id) => {
-      if (id === hoveredTrackId) {
-        polyline.setStyle({ weight: 6, opacity: 1.0 });
-        polyline.bringToFront();
-      } else {
-        polyline.setStyle({ weight: 3, opacity: 0.7 });
-      }
-    });
-  }, [hoveredTrackId]);
-
-    // Effect for highlighting AI selected track segment
-    useEffect(() => {
-        const map = mapRef.current;
-        if (!map) return;
-
-        if (aiSegmentPolylineRef.current) {
-            map.removeLayer(aiSegmentPolylineRef.current);
-            aiSegmentPolylineRef.current = null;
-        }
-
-        if (aiSegmentHighlight && tracks.length > 0) {
-            const track = tracks.find(t => visibleTrackIds.has(t.id));
-            if (!track) return;
-
-            const points = getPointsInDistanceRange(track, aiSegmentHighlight.startDistance, aiSegmentHighlight.endDistance);
-            if (points.length > 1) {
-                const latlngs = points.map(p => [p.lat, p.lon]);
-                aiSegmentPolylineRef.current = L.polyline(latlngs, {
-                    color: '#67e8f9', // A bright cyan
-                    weight: 7,
-                    opacity: 0.9
-                }).addTo(map);
-                aiSegmentPolylineRef.current.bringToFront();
-                map.fitBounds(aiSegmentPolylineRef.current.getBounds(), { padding: [50, 50] });
-            }
-        }
-    }, [aiSegmentHighlight, tracks, visibleTrackIds]);
-
-  // Effect for highlighting selected track segment in editor
-  useEffect(() => {
-      const map = mapRef.current;
-      if (!map) return;
-
-      // Remove existing selection layer
-      if (selectionPolylineRef.current) {
-          map.removeLayer(selectionPolylineRef.current);
-          selectionPolylineRef.current = null;
-      }
-
-      if (selectionPoints && selectionPoints.length > 1) {
-          const latlngs = selectionPoints.map(p => [p.lat, p.lon]);
-          selectionPolylineRef.current = L.polyline(latlngs, {
-              color: '#fde047', // A bright yellow
-              weight: 7,
-              opacity: 0.9
-          }).addTo(map);
-          selectionPolylineRef.current.bringToFront();
-      }
-  }, [selectionPoints]);
-
-
+  // RENDER TRACKS
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || animationTrack) return; // Don't show race markers during single animation
+    if (!map) return;
 
-    if (!raceRunners) {
-        raceMarkersRef.current.forEach(marker => map.removeLayer(marker));
-        raceMarkersRef.current.clear();
-        return;
-    }
-    
-    const activeRunnerIds = new Set();
-    raceRunners.forEach(r => activeRunnerIds.add(r.trackId));
+    // Clear old polylines
+    polylinesRef.current.forEach(layer => map.removeLayer(layer));
+    polylinesRef.current.clear();
+    raceFaintPolylinesRef.current.forEach(layer => map.removeLayer(layer));
+    raceFaintPolylinesRef.current.clear();
+    kmMarkersLayerGroupRef.current?.clearLayers();
 
-    // Remove markers for finished/inactive runners
-    raceMarkersRef.current.forEach((marker, id) => {
-        if(!activeRunnerIds.has(id)){
-            map.removeLayer(marker);
-            raceMarkersRef.current.delete(id);
+    tracks.forEach(track => {
+        if (!visibleTrackIds.has(track.id)) return;
+
+        const isHovered = hoveredTrackId === track.id;
+        
+        // MODALITÀ GARA
+        if (raceRunners && raceRunners.length > 0) {
+            const runner = raceRunners.find(r => r.trackId === track.id);
+            if (!runner) return;
+
+            const faintLayer = L.polyline(track.points.map(p => [p.lat, p.lon]), {
+                color: track.color,
+                weight: 2,
+                opacity: 0.15,
+                lineJoin: 'round',
+                interactive: false
+            }).addTo(map);
+            raceFaintPolylinesRef.current.set(track.id, faintLayer);
+
+            const currentDist = runner.position.cummulativeDistance;
+            const passedPoints = track.points.filter(p => p.cummulativeDistance <= currentDist);
+            if (passedPoints.length > 1) {
+                passedPoints.push(runner.position);
+                const passedLayer = L.polyline(passedPoints.map(p => [p.lat, p.lon]), {
+                    color: track.color,
+                    weight: 4,
+                    opacity: 0.8,
+                    lineJoin: 'round'
+                }).addTo(map);
+                polylinesRef.current.set(track.id, passedLayer);
+            }
+        } 
+        else {
+            const opacity = isHovered ? 1 : 0.6;
+            const weight = isHovered ? 5 : 3;
+
+            let layer;
+            if (mapGradientMetric !== 'none') {
+                const coloredSegments = getTrackSegmentColors(track, mapGradientMetric as GradientMetric, track.color);
+                layer = L.featureGroup(coloredSegments.map(seg => 
+                    L.polyline([[seg.p1.lat, seg.p1.lon], [seg.p2.lat, seg.p2.lon]], {
+                        color: seg.color,
+                        weight: weight + 1,
+                        opacity: opacity,
+                        lineJoin: 'round'
+                    })
+                ));
+            } else {
+                layer = L.polyline(track.points.map(p => [p.lat, p.lon]), {
+                    color: track.color,
+                    weight: weight,
+                    opacity: opacity,
+                    lineJoin: 'round'
+                });
+            }
+
+            layer.on('mouseover', () => onTrackHover?.(track.id));
+            layer.on('mouseout', () => onTrackHover?.(null));
+            layer.addTo(map);
+            polylinesRef.current.set(track.id, layer);
         }
-    });
 
-    raceRunners.forEach(runner => {
-      const { trackId, position, color } = runner;
-      const speed = runnerSpeeds.get(trackId) ?? 0;
-      const paceLabel = formatPaceFromSpeed(speed);
-
-      const iconHtml = `<div style="background-color: ${color};" class="w-4 h-4 rounded-full border-2 border-white shadow-lg"></div>`;
-      const customIcon = L.divIcon({
-        html: iconHtml,
-        className: 'custom-runner-icon',
-        iconSize: [16, 16],
-        iconAnchor: [8, 8]
-      });
-
-      if (raceMarkersRef.current.has(trackId)) {
-        const marker = raceMarkersRef.current.get(trackId);
-        marker.setLatLng([position.lat, position.lon]);
-        marker.setTooltipContent(paceLabel);
-      } else {
-        const marker = L.marker([position.lat, position.lon], { icon: customIcon }).addTo(map);
-        marker.bindTooltip(paceLabel, { permanent: true, direction: 'top', offset: [0, -8], className: 'pace-tooltip' });
-        raceMarkersRef.current.set(trackId, marker);
-      }
-    });
-
-  }, [raceRunners, runnerSpeeds, animationTrack]);
-
-    const animationStats = useMemo(() => {
-        if (!animationTrack) return { time: '00:00:00', pace: '--:--', elevation: 0, hr: null };
-        const currentPoint = getTrackPointAtDistance(animationTrack, animationProgress);
-        if (!currentPoint) return { time: '00:00:00', pace: '--:--', elevation: 0, hr: null };
-        
-        const elapsedTime = currentPoint.time.getTime() - animationTrack.points[0].time.getTime();
-        
-        let averagePaceValue = 0;
-        if (animationProgress > 0 && elapsedTime > 0) {
-            averagePaceValue = (elapsedTime / 60000) / animationProgress;
-        }
-        
-        return {
-            time: formatDuration(elapsedTime),
-            pace: formatPace(averagePaceValue),
-            elevation: Math.round(currentPoint.ele),
-            hr: currentPoint.hr ? Math.round(currentPoint.hr) : null,
-        };
-    }, [animationTrack, animationProgress]);
-
-    // Pre-calculate speed segments for the animation track to improve performance
-    const speedSegments = useMemo(() => {
-        if (!animationTrack) return [];
-        return getTrackSegmentColors(animationTrack, 'speed');
-    }, [animationTrack]);
-
-    const animationTrackStats = useMemo(() => {
-        if (animationTrack) return calculateTrackStats(animationTrack);
-        return null;
-    }, [animationTrack]);
-
-    // Effect for single track animation with fading trail
-    useEffect(() => {
-        const map = mapRef.current;
-        if (!map) return;
-
-        const cleanup = () => {
-            if (animationMarkerRef.current) {
-                map.removeLayer(animationMarkerRef.current);
-                animationMarkerRef.current = null;
-            }
-            if (animationHistoryPolylineRef.current) {
-                map.removeLayer(animationHistoryPolylineRef.current);
-                animationHistoryPolylineRef.current = null;
-            }
-            if (animationTailLayerRef.current) {
-                map.removeLayer(animationTailLayerRef.current);
-                animationTailLayerRef.current = null;
-            }
-        };
-
-        if (animationTrack) {
-            // 1. Draw/Update the Marker
-            const currentPoint = getTrackPointAtDistance(animationTrack, animationProgress);
-            if (currentPoint) {
-                const latlng = [currentPoint.lat, currentPoint.lon];
-                if (animationMarkerRef.current) {
-                    animationMarkerRef.current.setLatLng(latlng);
-                } else {
-                    const iconHtml = `<div style="background-color: ${animationTrack.color};" class="w-5 h-5 rounded-full border-2 border-white shadow-lg animate-pulse"></div>`;
-                    const customIcon = L.divIcon({
-                        html: iconHtml,
-                        className: 'custom-runner-icon',
+        if (!raceRunners && (visibleTrackIds.size === 1 || isHovered)) {
+            for (let km = 1; km < track.distance; km++) {
+                const pt = getTrackPointAtDistance(track, km);
+                if (pt) {
+                    const icon = L.divIcon({
+                        className: 'km-marker',
+                        html: `<span>${km}</span>`,
                         iconSize: [20, 20],
                         iconAnchor: [10, 10]
                     });
-                    animationMarkerRef.current = L.marker(latlng, { icon: customIcon, zIndexOffset: 1000 }).addTo(map);
-                }
-                
-                // Pan map if playing (not in summary mode)
-                if (isAnimationPlaying && !showSummaryMode) {
-                    map.panTo(latlng, { animate: true, duration: 0.5, easeLinearity: 1 });
+                    L.marker([pt.lat, pt.lon], { icon, interactive: false }).addTo(kmMarkersLayerGroupRef.current);
                 }
             }
-
-            // --- VISUALIZATION: TRAIL & HISTORY ---
-            
-            const TAIL_LENGTH = 0.3; // 300 meters for the colored speed trail
-            const historyEndDistance = Math.max(0, animationProgress - TAIL_LENGTH);
-
-            // 2. Draw History (Light Blue Line)
-            // Covers from 0 to historyEndDistance. In summary mode, covers everything.
-            if (historyEndDistance > 0 || showSummaryMode) {
-                const effectiveEndDistance = showSummaryMode ? animationTrack.distance : historyEndDistance;
-                const historyPoints = getPointsInDistanceRange(animationTrack, 0, effectiveEndDistance);
-                
-                // Ensure continuity: add the exact point at effectiveEndDistance
-                if (!showSummaryMode) {
-                    const tailStartPoint = getTrackPointAtDistance(animationTrack, effectiveEndDistance);
-                    if (tailStartPoint) historyPoints.push(tailStartPoint);
-                }
-
-                if (historyPoints.length > 1) {
-                    const latlngs = historyPoints.map(p => [p.lat, p.lon]);
-                    if (animationHistoryPolylineRef.current) {
-                        animationHistoryPolylineRef.current.setLatLngs(latlngs);
-                    } else {
-                        animationHistoryPolylineRef.current = L.polyline(latlngs, {
-                            color: '#38bdf8', // sky-400 (light blue)
-                            weight: 3,
-                            opacity: 0.5 // Slightly transparent
-                        }).addTo(map);
-                    }
-                }
-            } else if (animationHistoryPolylineRef.current) {
-                animationHistoryPolylineRef.current.setLatLngs([]);
-            }
-
-            // 3. Draw Active Tail (Colored by Speed + Fading Opacity)
-            // Don't draw tail in summary mode (entire track is history)
-            if (animationTailLayerRef.current) {
-                animationTailLayerRef.current.clearLayers();
-            } else {
-                animationTailLayerRef.current = L.featureGroup().addTo(map);
-            }
-
-            if (!showSummaryMode && speedSegments.length > 0) {
-                // A. Segments strictly inside the tail window [historyEndDistance, animationProgress]
-                // We filter segments that "overlap" with the window, then clamp them.
-                
-                const relevantSegments = speedSegments.filter(seg => 
-                    // Segment starts before end of window AND ends after start of window
-                    seg.p1.cummulativeDistance < animationProgress &&
-                    seg.p2.cummulativeDistance > historyEndDistance
-                );
-
-                relevantSegments.forEach(seg => {
-                    // Determine exact start/end coordinates for this segment within the tail window
-                    // to prevent gaps or overshooting.
-                    
-                    // Start: Max of segment start or tail start (history end)
-                    const effectiveStartDist = Math.max(seg.p1.cummulativeDistance, historyEndDistance);
-                    // End: Min of segment end or tail end (current position)
-                    const effectiveEndDist = Math.min(seg.p2.cummulativeDistance, animationProgress);
-
-                    // If effective segment has length > 0
-                    if (effectiveEndDist > effectiveStartDist) {
-                        const p1Coords = getTrackPointAtDistance(animationTrack, effectiveStartDist);
-                        const p2Coords = getTrackPointAtDistance(animationTrack, effectiveEndDist);
-
-                        if (p1Coords && p2Coords) {
-                             // Calculate opacity based on position in the tail
-                            const distFromTailStart = effectiveStartDist - historyEndDistance;
-                            let opacity = distFromTailStart / TAIL_LENGTH;
-                            opacity = Math.max(0.1, Math.min(1, opacity));
-
-                            L.polyline([
-                                [p1Coords.lat, p1Coords.lon],
-                                [p2Coords.lat, p2Coords.lon]
-                            ], {
-                                color: seg.color,
-                                weight: 5,
-                                opacity: opacity
-                            }).addTo(animationTailLayerRef.current);
-                        }
-                    }
-                });
-            }
-
-        } else {
-            cleanup();
         }
-        
-        return cleanup;
-    }, [animationTrack, animationProgress, isAnimationPlaying, speedSegments, showSummaryMode]);
+    });
 
-    // Effect to initialize km markers
-    useEffect(() => {
-        const map = mapRef.current;
-        if (!map || !animationTrack) return;
+    if (selectionPolylineRef.current) map.removeLayer(selectionPolylineRef.current);
+    if (selectionPoints && selectionPoints.length > 1) {
+        selectionPolylineRef.current = L.polyline(selectionPoints.map(p => [p.lat, p.lon]), {
+            color: '#fde047',
+            weight: 8,
+            opacity: 0.8,
+            lineCap: 'round',
+            dashArray: '1, 10'
+        }).addTo(map);
+    }
 
-        // Cleanup function for initial setup
-        const cleanup = () => {
-            if (kmMarkersLayerGroupRef.current) {
-                map.removeLayer(kmMarkersLayerGroupRef.current);
-                kmMarkersLayerGroupRef.current = null;
-            }
-            kmMarkersRef.current.clear();
-        };
-        cleanup(); // Ensure clean state
+    if (aiSegmentPolylineRef.current) map.removeLayer(aiSegmentPolylineRef.current);
+    if (aiSegmentHighlight && tracks.length > 0) {
+        const pts = getPointsInDistanceRange(tracks[0], aiSegmentHighlight.startDistance, aiSegmentHighlight.endDistance);
+        if (pts.length > 1) {
+            aiSegmentPolylineRef.current = L.polyline(pts.map(p => [p.lat, p.lon]), {
+                color: '#22d3ee',
+                weight: 10,
+                opacity: 0.9,
+                lineCap: 'round'
+            }).addTo(map);
+        }
+    }
 
-        const markersLayer = L.layerGroup().addTo(map);
-        kmMarkersLayerGroupRef.current = markersLayer;
+  }, [tracks, visibleTrackIds, hoveredTrackId, mapGradientMetric, selectionPoints, aiSegmentHighlight, onTrackHover, raceRunners]);
 
-        for (let km = 1; km < animationTrack.distance; km++) {
-            const point = getTrackPointAtDistance(animationTrack, km);
-            if (point) {
-                const isFastest = fastestSplitForAnimation?.splitNumber === km;
-                const iconHtml = `
-                    <div class="km-marker ${isFastest ? 'fastest' : ''}">
-                        ${km}
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    raceRunnerMarkersRef.current.forEach(m => map.removeLayer(m));
+    raceRunnerMarkersRef.current.clear();
+
+    if (raceRunners && raceRunners.length > 0) {
+        raceRunners.forEach(runner => {
+            const track = tracks.find(t => t.id === runner.trackId);
+            if (!track) return;
+
+            const icon = L.divIcon({
+                className: 'race-cursor-icon',
+                html: `
+                    <div class="relative flex flex-col items-center">
+                        <div class="cursor-dot" style="background-color: ${runner.color};"></div>
+                        <div class="pace-label" style="background-color: ${runner.color};">
+                           ${formatPace(runner.pace)}
+                        </div>
                     </div>
-                `;
-                const kmIcon = L.divIcon({
-                    html: iconHtml,
-                    className: 'custom-km-marker-icon',
-                    iconSize: [24, 24],
-                    iconAnchor: [12, 24]
-                });
+                `,
+                iconSize: [60, 40],
+                iconAnchor: [30, 20]
+            });
 
-                const marker = L.marker([point.lat, point.lon], { icon: kmIcon, zIndexOffset: 500, opacity: 0 }); // Initially hidden
-                marker.addTo(markersLayer);
-                kmMarkersRef.current.set(km, marker);
-            }
-        }
-
-        return cleanup;
-    }, [animationTrack, fastestSplitForAnimation]);
-
-
-    // Effect to update km markers (show stats and toggle visibility) based on progress
-    useEffect(() => {
-        if (!animationTrack || !animationTrackStats) return;
-
-        const currentKm = Math.floor(animationProgress);
-        
-        // Iterate through all markers to update visibility based on progress
-        kmMarkersRef.current.forEach((marker, k) => {
-            if (!marker) return;
-
-            // In summary mode, show all markers. Otherwise check progress.
-            if (showSummaryMode || k <= currentKm) {
-                // Marker passed, show it
-                if (marker.setOpacity && marker.options && marker.options.opacity !== 1) {
-                    marker.setOpacity(1);
-                }
-
-                // Show tooltip logic (only if playing OR in summary mode)
-                if (isAnimationPlaying || showSummaryMode) {
-                    // Defensively check for tooltip existence and state
-                    const tooltip = marker.getTooltip ? marker.getTooltip() : null;
-                    const isTooltipOpen = tooltip && tooltip.isOpen ? tooltip.isOpen() : false;
-
-                    if (!isTooltipOpen && marker.bindTooltip) {
-                        const splitData = animationTrackStats.splits.find(s => s.splitNumber === k);
-                        if (splitData) {
-                            const content = `
-                                <div class="text-xs font-mono bg-slate-900/90 text-white p-1.5 rounded border border-slate-600 shadow-lg leading-tight">
-                                    <div class="font-bold text-amber-400 mb-0.5">Km ${k}</div>
-                                    <div>⏱ ${formatSplitDuration(splitData.duration)}</div>
-                                    <div>⚡ ${formatPace(splitData.pace)}</div>
-                                    <div>⛰ +${Math.round(splitData.elevationGain)}m</div>
-                                </div>
-                            `;
-                            
-                            let direction: 'right' | 'left' | 'top' | 'bottom' | 'auto' = 'auto';
-                            let offset: [number, number] = [14, 0];
-
-                            if (k > 1) {
-                                const prevMarker = kmMarkersRef.current.get(k - 1);
-                                if (prevMarker) {
-                                    const currentLatLng = marker.getLatLng();
-                                    const prevLatLng = prevMarker.getLatLng();
-                                    const dist = currentLatLng.distanceTo(prevLatLng); 
-                                    if (dist < 150) {
-                                        direction = 'bottom';
-                                        offset = [0, 14];
-                                    }
-                                }
-                            }
-
-                            if (!tooltip) {
-                                marker.bindTooltip(content, { 
-                                    permanent: true, 
-                                    direction: direction, 
-                                    offset: offset,
-                                    className: 'km-stat-tooltip',
-                                    opacity: 0.95
-                                });
-                            }
-                            
-                            if (marker.openTooltip) {
-                                marker.openTooltip();
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Marker ahead, hide it (handle rewind)
-                if (marker.setOpacity && marker.options && marker.options.opacity !== 0) {
-                    marker.setOpacity(0);
-                    if (marker.closeTooltip) {
-                        marker.closeTooltip();
-                    }
-                }
-            }
+            const marker = L.marker([runner.position.lat, runner.position.lon], { 
+                icon,
+                zIndexOffset: 1000 
+            }).addTo(map);
+            raceRunnerMarkersRef.current.set(runner.trackId, marker);
         });
-    }, [animationProgress, isAnimationPlaying, animationTrack, animationTrackStats, showSummaryMode]);
+    }
+  }, [raceRunners, tracks]);
 
-
-  // Effect for hovered point on editor chart
   useEffect(() => {
-      const map = mapRef.current;
-      if (!map) return;
+    const map = mapRef.current;
+    if (!map) return;
+    if (hoverMarkerRef.current) map.removeLayer(hoverMarkerRef.current);
+    if (hoveredPoint) {
+        hoverMarkerRef.current = L.circleMarker([hoveredPoint.lat, hoveredPoint.lon], {
+            radius: 7,
+            color: '#fff',
+            fillColor: '#0ea5e9',
+            fillOpacity: 1,
+            weight: 3
+        }).addTo(map);
+    }
+  }, [hoveredPoint]);
 
-      if (hoveredPoint) {
-          const latlng = [hoveredPoint.lat, hoveredPoint.lon];
-          if (hoverMarkerRef.current) {
-              hoverMarkerRef.current.setLatLng(latlng);
-          } else {
-              hoverMarkerRef.current = L.circleMarker(latlng, {
-                  radius: 8,
-                  color: '#fde047',
-                  fillColor: '#facc15',
-                  fillOpacity: 0.8,
-                  weight: 2,
-              }).addTo(map);
-          }
-          hoverMarkerRef.current.bringToFront();
+  useEffect(() => { if (isAutoFitEnabled && !raceRunners && !animationTrack && !showSummaryMode) fitMapToBounds(); }, [isAutoFitEnabled, fitMapToBounds, raceRunners, animationTrack, visibleTrackIds, showSummaryMode]);
+  useEffect(() => { if (fitBoundsCounter > 0) fitMapToBounds(); }, [fitBoundsCounter, fitMapToBounds]);
 
-          // Calculate point metrics for the tooltip
-          const track = tracks.find(t => visibleTrackIds.has(t.id));
-          if (track) {
-              const calculatePointMetrics = (point: TrackPoint, track: Track) => {
-                const index = track.points.findIndex(p => p.time.getTime() === point.time.getTime());
-                if (index < 1) return { speed: 0, pace: '--:--' };
-                
-                const p1 = track.points[index - 1];
-                const p2 = track.points[index];
-                
-                const dist = p2.cummulativeDistance - p1.cummulativeDistance;
-                const time = (p2.time.getTime() - p1.time.getTime()) / 3600000;
-                
-                if (time > 0 && dist >= 0) {
-                    const speed = dist / time;
-                    if (speed < 0.1) return { speed: 0, pace: '--:--' };
-
-                    const paceVal = 60 / speed;
-                    const minutes = Math.floor(paceVal);
-                    const seconds = Math.round((paceVal - minutes) * 60);
-                    const paceStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-                    return { speed, pace: paceStr };
-                }
-                return { speed: 0, pace: '--:--' };
-            };
-
-            const metrics = calculatePointMetrics(hoveredPoint, track);
-            
-            const tooltipContent = `
-                <div class="text-xs font-mono bg-slate-900/90 text-white p-2 rounded border border-slate-600 shadow-xl pointer-events-none">
-                    <div class="font-bold text-sky-400 mb-1">Point Data</div>
-                    <div>📍 ${hoveredPoint.cummulativeDistance.toFixed(2)} km</div>
-                    <div>⛰ ${hoveredPoint.ele.toFixed(1)} m</div>
-                    <div>⚡ ${metrics.pace} /km</div>
-                    ${hoveredPoint.hr ? `<div>❤️ ${hoveredPoint.hr} bpm</div>` : ''}
-                </div>
-            `;
-            
-            // Check if tooltip is already bound
-            if (!hoverMarkerRef.current.getTooltip()) {
-                hoverMarkerRef.current.bindTooltip(tooltipContent, {
-                    permanent: true,
-                    direction: 'top',
-                    offset: [0, -10],
-                    className: 'km-stat-tooltip', // Re-use the transparent class to style manually
-                    opacity: 1
-                });
-            } else {
-                hoverMarkerRef.current.setTooltipContent(tooltipContent);
-            }
-            
-            hoverMarkerRef.current.openTooltip();
-          }
-
-      } else {
-          if (hoverMarkerRef.current) {
-              map.removeLayer(hoverMarkerRef.current);
-              hoverMarkerRef.current = null;
-          }
-      }
-  }, [hoveredPoint, tracks, visibleTrackIds]);
-
-    // Effect for selected point popup in editor
-    useEffect(() => {
-        const map = mapRef.current;
-        if (!map || !onPointClick) return;
-
-        const cleanupPopup = () => {
-            if (selectedPointPopupRef.current) {
-                map.removeLayer(selectedPointPopupRef.current);
-                selectedPointPopupRef.current = null;
-            }
-        };
-
-        cleanupPopup();
-
-        if (selectedPoint) {
-            const track = tracks.find(t => visibleTrackIds.has(t.id));
-            if (!track) return;
-            
-            const calculatePointMetrics = (point: TrackPoint, track: Track) => {
-                const index = track.points.findIndex(p => p.time.getTime() === point.time.getTime());
-                if (index < 1) return { speed: 0, pace: '--:--' };
-                
-                const p1 = track.points[index - 1];
-                const p2 = track.points[index];
-                
-                const dist = p2.cummulativeDistance - p1.cummulativeDistance;
-                const time = (p2.time.getTime() - p1.time.getTime()) / 3600000;
-                
-                if (time > 0 && dist >= 0) {
-                    const speed = dist / time;
-                    if (speed < 0.1) return { speed: 0, pace: '--:--' };
-
-                    const paceVal = 60 / speed;
-                    const minutes = Math.floor(paceVal);
-                    const seconds = Math.round((paceVal - minutes) * 60);
-                    const paceStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-                    return { speed, pace: paceStr };
-                }
-                return { speed: 0, pace: '--:--' };
-            };
-
-            const metrics = calculatePointMetrics(selectedPoint, track);
-
-            const popupContent = `
-                <div class="text-sm text-slate-200">
-                    <h4 class="font-bold text-base text-white border-b border-slate-600 mb-2 pb-1">Point Details</h4>
-                    <div class="grid grid-cols-2 gap-x-3 gap-y-1 font-mono">
-                        <span class="text-slate-400">Time:</span> <span>${selectedPoint.time.toLocaleTimeString()}</span>
-                        <span class="text-slate-400">Pace:</span> <span>${metrics.pace} /km</span>
-                        <span class="text-slate-400">Speed:</span> <span>${metrics.speed.toFixed(1)} km/h</span>
-                        <span class="text-slate-400">Elevation:</span> <span>${selectedPoint.ele.toFixed(1)} m</span>
-                        <span class="text-slate-400">Distance:</span> <span>${selectedPoint.cummulativeDistance.toFixed(2)} km</span>
-                        ${selectedPoint.hr ? `<span class="text-slate-400">Heart Rate:</span> <span>${selectedPoint.hr} bpm</span>` : ''}
-                    </div>
-                </div>
-            `;
-            
-            const popup = L.popup({
-                closeButton: true,
-                autoClose: false,
-                closeOnClick: false,
-                className: 'gpx-details-popup'
-            })
-            .setLatLng([selectedPoint.lat, selectedPoint.lon])
-            .setContent(popupContent)
-            .openOn(map);
-
-            popup.on('remove', () => {
-                onPointClick(null);
-            });
-
-            selectedPointPopupRef.current = popup;
-        }
-    }, [selectedPoint, onPointClick, tracks, visibleTrackIds]);
-
-  // Effect for pause markers
-  useEffect(() => {
-      const map = mapRef.current;
-      if (!map) return;
-
-      // Clear existing layer
-      if (pauseMarkersLayerRef.current) {
-          map.removeLayer(pauseMarkersLayerRef.current);
-          pauseMarkersLayerRef.current = null;
-      }
-
-      if (showPauses && pauseSegments && pauseSegments.length > 0) {
-          const pauseIcon = L.divIcon({
-              html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 text-amber-400 drop-shadow-lg ${onPauseClick ? 'cursor-pointer' : ''}">
-                       <path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM12.75 6a.75.75 0 00-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 0 00-1.5h-3.75V6z" clip-rule="evenodd" />
-                     </svg>`,
-              className: 'custom-pause-icon',
-              iconSize: [24, 24],
-              iconAnchor: [12, 12]
-          });
-
-          const markers = pauseSegments.map(segment => {
-            const marker = L.marker([segment.startPoint.lat, segment.startPoint.lon], { icon: pauseIcon });
-            if (onPauseClick) {
-                marker.on('click', () => {
-                    onPauseClick(segment);
-                });
-            }
-            return marker;
-          });
-          pauseMarkersLayerRef.current = L.layerGroup(markers).addTo(map);
-      }
-  }, [showPauses, pauseSegments, onPauseClick]);
-  
-    // Effect for coloring pause segments
-    useEffect(() => {
-        const map = mapRef.current;
-        if (!map) return;
-
-        // Clear existing layer
-        if (pausePolylinesLayerRef.current) {
-            map.removeLayer(pausePolylinesLayerRef.current);
-            pausePolylinesLayerRef.current = null;
-        }
-
-        if (coloredPauseSegments && coloredPauseSegments.length > 0 && tracks.length > 0) {
-            const track = tracks.find(t => visibleTrackIds.has(t.id));
-            if (!track) return;
-            
-            const getPointsForSegment = (track: Track, segment: PauseSegment): TrackPoint[] => {
-                const points: TrackPoint[] = [];
-                points.push(segment.startPoint);
-                for(const p of track.points) {
-                    if (p.cummulativeDistance > segment.startPoint.cummulativeDistance && p.cummulativeDistance < segment.endPoint.cummulativeDistance) {
-                        points.push(p);
-                    }
-                }
-                points.push(segment.endPoint);
-                return points;
-            }
-
-            const pauseLines = coloredPauseSegments.map(segment => {
-                const pointsForSegment = getPointsForSegment(track, segment);
-                const latlngs = pointsForSegment.map(p => [p.lat, p.lon]);
-                return L.polyline(latlngs, {
-                    color: '#71717a', // zinc-500 for a neutral gray
-                    weight: 5,
-                    opacity: 0.9
-                });
-            });
-
-            if (pauseLines.length > 0) {
-                pausePolylinesLayerRef.current = L.featureGroup(pauseLines).addTo(map);
-                pausePolylinesLayerRef.current.bringToFront();
-            }
-        }
-    }, [coloredPauseSegments, tracks, visibleTrackIds]);
-
-    // Effect for Gradient Profile
-    useEffect(() => {
-        const map = mapRef.current;
-        if (!map) return;
-
-        const cleanup = () => {
-            if (elevationLayerRef.current) {
-                map.removeLayer(elevationLayerRef.current);
-                elevationLayerRef.current = null;
-            }
-            if (legendControlRef.current) {
-                map.removeControl(legendControlRef.current);
-                legendControlRef.current = null;
-                legendMarkerRef.current = null;
-            }
-            setLegendRange(null);
-            if (hiddenPolylineIdRef.current) {
-                const polyline = polylinesRef.current.get(hiddenPolylineIdRef.current);
-                if (polyline) {
-                    polyline.setStyle({ opacity: 0.7 });
-                }
-                hiddenPolylineIdRef.current = null;
-            }
-        };
-
-        if (mapGradientMetric && mapGradientMetric !== 'none' && visibleTrackIds.size > 0) {
-            cleanup();
-
-            let trackId = '';
-            for (const id of visibleTrackIds) {
-                trackId = id;
-                break;
-            }
-            if (!trackId) return;
-
-            const track = tracks.find(t => t.id === trackId);
-            if (!track || track.points.length < 2) return;
-
-            // This logic for the legend is intentionally duplicated from colorService
-            // to keep the service decoupled from UI concerns like formatting.
-            let values: (number | null)[] = [];
-            let legendTitle = '', legendGradientCss = '';
-            let valueFormatter: (val: number) => string = val => val.toString();
-            let useZoneLegend = false;
-
-            switch (mapGradientMetric) {
-                case 'elevation':
-                    legendTitle = 'Elevation';
-                    values = track.points.map(p => p.ele);
-                    valueFormatter = val => `${Math.round(val)} m`;
-                    legendGradientCss = `linear-gradient(to top, hsl(120, 90%, 50%), hsl(60, 90%, 50%), hsl(0, 90%, 50%))`;
-                    break;
-                case 'speed':
-                    legendTitle = 'Speed';
-                    values = track.points.map((p, i) => {
-                        if (i === 0) return null;
-                        const p1 = track.points[i-1];
-                        const dist = p.cummulativeDistance - p1.cummulativeDistance;
-                        const time = (p.time.getTime() - p1.time.getTime()) / 3600000;
-                        return time > 0 ? Math.min(50, dist / time) : null;
-                    });
-                    valueFormatter = val => `${val.toFixed(1)} km/h`;
-                    legendGradientCss = `linear-gradient(to top, hsl(0, 90%, 50%), hsl(60, 90%, 50%), hsl(120, 90%, 50%))`;
-                    break;
-                case 'pace':
-                    legendTitle = 'Pace';
-                    values = track.points.map((p, i) => {
-                        if (i === 0) return null;
-                        const p1 = track.points[i-1];
-                        const dist = p.cummulativeDistance - p1.cummulativeDistance;
-                        const time = (p.time.getTime() - p1.time.getTime()) / 60000;
-                        return dist > 0.001 ? Math.min(20, time / dist) : null;
-                    });
-                    valueFormatter = pace => {
-                        const minutes = Math.floor(pace);
-                        const seconds = Math.round((pace - minutes) * 60);
-                        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-                    };
-                    legendGradientCss = `linear-gradient(to top, hsl(120, 90%, 50%), hsl(60, 90%, 50%), hsl(0, 90%, 50%))`;
-                    break;
-                case 'hr':
-                    legendTitle = 'Heart Rate (Gradient)';
-                    values = track.points.map(p => p.hr ?? null);
-                    valueFormatter = val => `${Math.round(val)} bpm`;
-                    legendGradientCss = `linear-gradient(to top, hsl(240, 90%, 50%), hsl(120, 90%, 50%), hsl(0, 90%, 50%))`;
-                    break;
-                case 'hr_zones':
-                    legendTitle = 'Heart Rate Zones';
-                    values = track.points.map(p => p.hr ?? null);
-                    useZoneLegend = true;
-                    break;
-            }
-            
-            const validValues = values.filter((v): v is number => v !== null && isFinite(v));
-            if (validValues.length < 2) {
-                cleanup();
-                return;
-            }
-
-            const minVal = Math.min(...validValues);
-            const maxVal = Math.max(...validValues);
-            setLegendRange({ min: minVal, max: maxVal });
-            
-            const coloredSegments = getTrackSegmentColors(track, mapGradientMetric);
-            
-            if (coloredSegments.length > 0) {
-                const segments = coloredSegments.map(segment => {
-                    return L.polyline([[segment.p1.lat, segment.p1.lon], [segment.p2.lat, segment.p2.lon]], {
-                        color: segment.color,
-                        weight: 5,
-                        opacity: 0.85
-                    });
-                });
-
-                elevationLayerRef.current = L.layerGroup(segments).addTo(map);
-
-                const originalPolyline = polylinesRef.current.get(track.id);
-                if (originalPolyline) {
-                    originalPolyline.setStyle({ opacity: 0 });
-                    hiddenPolylineIdRef.current = track.id;
-                }
-                
-                const legend = new (L.Control as any)({position: 'bottomright'});
-                legend.onAdd = function() {
-                    const div = L.DomUtil.create('div', 'info legend bg-slate-800/80 p-2 rounded-md border border-slate-600 text-white text-xs relative');
-                    let legendHtml = '';
-                    if (useZoneLegend) {
-                         const hrValuesForZones = track.points.map(p => p.hr ?? null);
-                         const validHrs = hrValuesForZones.filter((v): v is number => v !== null && v > 0);
-                         const maxHr = Math.max(0, ...validHrs);
-                         legendHtml = `
-                            <h4 class="font-bold mb-1">${legendTitle}</h4>
-                            <div class="space-y-1 text-xs">
-                                <div class="flex items-center"><div class="w-3 h-3 rounded-sm mr-2" style="background-color: #ef4444;"></div> &gt;${Math.round(maxHr * 0.9)} bpm (Z5)</div>
-                                <div class="flex items-center"><div class="w-3 h-3 rounded-sm mr-2" style="background-color: #f97316;"></div> ${Math.round(maxHr * 0.8)}-${Math.round(maxHr * 0.9)} bpm (Z4)</div>
-                                <div class="flex items-center"><div class="w-3 h-3 rounded-sm mr-2" style="background-color: #eab308;"></div> ${Math.round(maxHr * 0.7)}-${Math.round(maxHr * 0.8)} bpm (Z3)</div>
-                                <div class="flex items-center"><div class="w-3 h-3 rounded-sm mr-2" style="background-color: #22c55e;"></div> ${Math.round(maxHr * 0.6)}-${Math.round(maxHr * 0.7)} bpm (Z2)</div>
-                                <div class="flex items-center"><div class="w-3 h-3 rounded-sm mr-2" style="background-color: #3b82f6;"></div> &lt;${Math.round(maxHr * 0.6)} bpm (Z1)</div>
-                            </div>
-                         `;
-                    } else {
-                        legendHtml = `
-                            <h4 class="font-bold mb-1">${legendTitle}</h4>
-                            <div class="flex items-center">
-                                <div class="legend-gradient" style="height: 100px; width: 15px; background: ${legendGradientCss}; border-radius: 3px;"></div>
-                                <div class="ml-1 flex flex-col justify-between h-[100px]">
-                                    <span>${valueFormatter(maxVal)}</span>
-                                    <span>${valueFormatter(minVal)}</span>
-                                </div>
-                            </div>
-                        `;
-                    }
-                    div.innerHTML = legendHtml;
-                    const marker = L.DomUtil.create('div', 'legend-marker', div);
-                    legendMarkerRef.current = marker;
-                    return div;
-                };
-                legend.onRemove = () => {
-                    legendMarkerRef.current = null;
-                };
-                legend.addTo(map);
-                legendControlRef.current = legend;
-            }
-
-        } else {
-            cleanup();
-        }
-
-        return cleanup;
-
-    }, [mapGradientMetric, tracks, visibleTrackIds]);
-    
-    // Effect for updating the legend marker position
-    useEffect(() => {
-        if (legendMarkerRef.current && hoveredLegendValue !== null && legendRange) {
-            const { min, max } = legendRange;
-            const range = max - min;
-            if (range > 0) {
-                // Pace is inverted (lower is "higher" performance), so we flip the ratio
-                const isPace = mapGradientMetric === 'pace';
-                const valueForRatio = isPace ? max - hoveredLegendValue + min : hoveredLegendValue;
-
-                const ratio = (valueForRatio - min) / range;
-                // top is 0% at max value, 100% at min value
-                const topPercent = (1 - ratio) * 100;
-                
-                legendMarkerRef.current.style.top = `${Math.max(0, Math.min(100, topPercent))}%`;
-                legendMarkerRef.current.style.display = 'block';
-            }
-        } else if (legendMarkerRef.current) {
-            legendMarkerRef.current.style.display = 'none';
-        }
-    }, [hoveredLegendValue, legendRange, mapGradientMetric]);
-
+  const handleZoomIn = () => mapRef.current?.zoomIn();
+  const handleZoomOut = () => mapRef.current?.zoomOut();
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full bg-slate-900">
       <div ref={mapContainerRef} className="h-full w-full" />
       
-       {/* Auto-fit Button */}
        {!animationTrack && (
-            <button
-                onClick={handleToggleAutoFit}
-                title={isAutoFitEnabled ? "Disable Auto-Fit" : "Enable Auto-Fit"}
-                className={`absolute top-16 left-2.5 z-[1000] p-2 rounded-md shadow-lg transition-colors duration-200 border border-slate-600
-                    ${isAutoFitEnabled
-                        ? 'bg-sky-500 text-white hover:bg-sky-400'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
-            >
-                <FitBoundsIcon />
-            </button>
+            <>
+                {/* TOOLBAR SUPERIORE - ORGANIZZAZIONE IN RIGA PER MOBILE */}
+                <div className="absolute top-2 left-2 right-2 z-[1000] pointer-events-none flex items-center justify-between">
+                    {/* SINISTRA: Gap per hamburger + Fit + Tema */}
+                    <div className="flex items-center gap-1 pointer-events-auto">
+                        {/* Spazio riservato per il pulsante hamburger che vive in App.tsx */}
+                        <div className="w-12 h-12 flex-shrink-0 sm:hidden"></div>
+                        
+                        <Tooltip text="Inquadra" position="bottom">
+                            <button 
+                                onClick={() => { setIsAutoFitEnabled(true); fitMapToBounds(); }} 
+                                className={`p-3 rounded-lg shadow-xl transition-all border border-slate-700 active:scale-95 ${isAutoFitEnabled ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-300'}`}
+                            >
+                                <FitBoundsIcon />
+                            </button>
+                        </Tooltip>
+                        <Tooltip text="Tema" position="bottom">
+                            <button 
+                                onClick={() => setMapTheme(prev => prev === 'dark' ? 'light' : 'dark')} 
+                                className="p-3 rounded-lg shadow-xl bg-slate-800 text-slate-300 hover:text-white border border-slate-700 active:scale-95"
+                            >
+                                {mapTheme === 'dark' ? <SunIcon /> : <MoonIcon />}
+                            </button>
+                        </Tooltip>
+                    </div>
+
+                    {/* CENTRO: Zoom custom centrato */}
+                    <div className="absolute left-1/2 -translate-x-1/2 flex items-center bg-slate-800/90 backdrop-blur-md rounded-lg border border-slate-700 shadow-xl pointer-events-auto overflow-hidden">
+                        <button 
+                            onClick={handleZoomOut} 
+                            className="p-3 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors border-r border-slate-700 active:bg-slate-600"
+                        >
+                            <ZoomOutIcon />
+                        </button>
+                        <button 
+                            onClick={handleZoomIn} 
+                            className="p-3 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors active:bg-slate-600"
+                        >
+                            <ZoomInIcon />
+                        </button>
+                    </div>
+
+                    {/* DESTRA: Vuoto per ora, per bilanciare */}
+                    <div className="w-12 h-12 hidden sm:block"></div>
+                </div>
+            </>
        )}
 
-        {/* Animation Controls - Hide in Summary Mode */}
         {animationTrack && !showSummaryMode && (
             <>
-                <StatsDisplay stats={animationStats} />
-                <AnimationControls
-                    isPlaying={isAnimationPlaying!}
-                    onTogglePlay={onToggleAnimationPlay!}
-                    progress={animationProgress}
-                    totalDistance={animationTrack.distance}
-                    onProgressChange={onAnimationProgressChange!}
-                    speed={animationSpeed!}
-                    onSpeedChange={onAnimationSpeedChange!}
-                    onExit={onExitAnimation!}
-                    isRecording={isRecording}
-                    onStartRecording={onStartRecording}
-                    onStopRecording={onStopRecording}
-                />
+                <StatsDisplay stats={animationStats} splits={animationTrackStats?.splits || []} currentDistance={animationProgress} visibleMetrics={visibleMetrics} />
+                <AnimationControls isPlaying={isAnimationPlaying!} onTogglePlay={onToggleAnimationPlay!} progress={animationProgress} totalDistance={animationTrack.distance} onProgressChange={onAnimationProgressChange!} speed={animationSpeed!} onSpeedChange={onAnimationSpeedChange!} onExit={onExitAnimation!} visibleMetrics={visibleMetrics} onToggleMetric={handleToggleMetric} />
             </>
         )}
 
-
-      {/* Hover Info Panel */}
-      <div 
-          className={`absolute top-4 right-4 bg-slate-800/80 backdrop-blur-sm p-4 rounded-lg shadow-lg w-72 transition-all duration-300 ease-in-out z-[1000] ${hoveredTrack && hoveredTrackStats ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4 pointer-events-none'}`}
-      >
-          {hoveredTrack && hoveredTrackStats && (
-              <div>
-                  <div className="flex items-start space-x-3">
-                      <TrackPreview 
-                          points={hoveredTrack.points} 
-                          color={hoveredTrack.color} 
-                          className="w-20 h-14 bg-slate-900 rounded flex-shrink-0 border border-slate-600"
-                      />
-                      <div className="flex-grow overflow-hidden">
-                           <h3 className="font-bold text-lg text-white truncate" title={hoveredTrack.name}>
-                              {hoveredTrack.name}
-                          </h3>
-                          <p className="text-xs text-slate-400">
-                              {new Date(hoveredTrack.points[0]?.time).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
-                          </p>
-                      </div>
-                  </div>
-                  <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                          <p className="text-slate-400">Distanza</p>
-                          <p className="text-xl font-semibold">{hoveredTrackStats.totalDistance.toFixed(2)} km</p>
-                      </div>
-                       <div>
-                          <p className="text-slate-400">Ritmo medio</p>
-                          <p className="text-xl font-semibold font-mono">{formatPace(hoveredTrackStats.movingAvgPace)}</p>
-                      </div>
-                      <div>
-                          <p className="text-slate-400">Tempo</p>
-                          <p className="text-xl font-semibold font-mono">{formatDuration(hoveredTrackStats.movingDuration)}</p>
-                      </div>
-                       <div>
-                          <p className="text-slate-400">Dislivello</p>
-                          <p className="text-xl font-semibold">{Math.round(hoveredTrackStats.elevationGain)} m</p>
-                      </div>
-                  </div>
-              </div>
-          )}
-      </div>
-      
-      {(animationHighlight || (showSummaryMode && fastestSplitForAnimation)) && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-900/80 backdrop-blur-md p-4 rounded-xl shadow-2xl border-2 border-amber-400 text-center z-[2000] animate-fade-in-pop w-full max-w-sm">
-              <div className="text-amber-400 font-bold text-xl mb-1">⚡️ Kilometro più veloce! ⚡️</div>
-              <div className="text-white">
-                  <span className="font-semibold">Km {(animationHighlight || fastestSplitForAnimation!).splitNumber}</span>
-              </div>
-              <div className="flex justify-center space-x-6 mt-3 text-white">
-                  <div>
-                      <div className="text-slate-400 text-xs">Ritmo</div>
-                      <div className="text-2xl font-bold font-mono">{formatPace((animationHighlight || fastestSplitForAnimation!).pace)}</div>
-                  </div>
-                  <div>
-                      <div className="text-slate-400 text-xs">Tempo</div>
-                      <div className="text-2xl font-bold font-mono">{formatSplitDuration((animationHighlight || fastestSplitForAnimation!).duration)}</div>
-                  </div>
-              </div>
-          </div>
-      )}
-
       <style>{`
-        .pace-tooltip {
-          background-color: rgba(17, 24, 39, 0.8);
-          border-color: rgba(55, 65, 81, 0.9);
-          color: #d1d5db;
-          font-family: monospace;
-          font-weight: bold;
-          padding: 2px 6px;
-          border-radius: 4px;
-          box-shadow: none;
-        }
-        .km-stat-tooltip {
-            background: transparent;
-            border: none;
-            box-shadow: none;
-            padding: 0;
-        }
-        .km-stat-tooltip:before {
-            display: none; /* Hide default arrow */
-        }
-        .custom-pause-icon {
-            background: transparent !important;
-            border: none !important;
-        }
-        .custom-km-marker-icon {
-            background: transparent !important;
-            border: none !important;
-        }
-        .km-marker {
-            background-color: rgba(30, 41, 59, 0.8);
-            color: white;
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
+        .km-marker { background: rgba(30, 41, 59, 0.9); color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; border: 1px solid #475569; pointer-events: none; }
+        
+        .race-cursor-icon {
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
-            font-weight: bold;
-            border: 1px solid #475569;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
         }
-        .km-marker.fastest {
-            background-color: #f59e0b;
-            color: #1e293b;
-            border-color: #fde047;
-            font-size: 14px;
+
+        .cursor-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
         }
-        .gpx-details-popup .leaflet-popup-content-wrapper {
-            background-color: rgba(30, 41, 59, 0.9);
-            color: #e2e8f0;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-            border: 1px solid #475569;
-        }
-        .gpx-details-popup .leaflet-popup-content {
-            margin: 12px;
-            font-family: sans-serif;
-        }
-        .gpx-details-popup .leaflet-popup-tip {
-            background-color: rgba(30, 41, 59, 0.9);
-        }
-        .gpx-details-popup a.leaflet-popup-close-button {
-            color: #94a3b8;
-        }
-        .gpx-details-popup a.leaflet-popup-close-button:hover {
-            color: #e2e8f0;
-        }
-        .legend-marker {
+
+        .pace-label {
             position: absolute;
-            left: 17px; /* Position it just outside the gradient bar */
-            width: 0;
-            height: 0;
-            border-top: 6px solid transparent;
-            border-bottom: 6px solid transparent;
-            border-left: 8px solid #fde047; /* yellow triangle */
-            transform: translateY(-50%);
-            transition: top 0.1s ease;
-            display: none;
-            pointer-events: none;
-        }
-        @keyframes fade-in-pop {
-            from { opacity: 0; transform: translate(-50%, -100%); }
-            to { opacity: 1; transform: translate(-50%, 0); }
-        }
-        .animate-fade-in-pop {
-            animation: fade-in-pop 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+            top: -24px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.3);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         }
       `}</style>
     </div>

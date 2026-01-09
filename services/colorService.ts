@@ -7,6 +7,7 @@ export interface ColoredSegment {
     p1: TrackPoint;
     p2: TrackPoint;
     color: string;
+    value?: number; // Added to support legend interactivity
 }
 
 // This function calculates a color for each segment of a track based on a metric.
@@ -48,7 +49,8 @@ export const getTrackSegmentColors = (track: Track, metric: GradientMetric, defa
             const p1 = track.points[i - 1];
             const p2 = track.points[i];
             const avgHr = (p1.hr ?? p2.hr ?? null) !== null ? ((p1.hr ?? p2.hr!) + (p2.hr ?? p1.hr!)) / 2 : null;
-            coloredSegments.push({ p1, p2, color: getColorForZone(avgHr) });
+            // Store the zone index or raw value if needed, here we treat avgHr as value
+            coloredSegments.push({ p1, p2, color: getColorForZone(avgHr), value: avgHr ?? undefined });
         }
         return coloredSegments;
     }
@@ -115,7 +117,7 @@ export const getTrackSegmentColors = (track: Track, metric: GradientMetric, defa
             color = colorFn(Math.max(0, Math.min(1, ratio))); // Clamp ratio to [0, 1]
         }
         
-        coloredSegments.push({ p1, p2, color });
+        coloredSegments.push({ p1, p2, color, value: avgValue ?? undefined });
     }
     
     return coloredSegments;

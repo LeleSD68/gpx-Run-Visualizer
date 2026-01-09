@@ -1,3 +1,4 @@
+
 import { TrackPoint } from '../types';
 import { smoothElevation } from './dataProcessingService';
 
@@ -41,6 +42,7 @@ export const parseTcx = (tcxString: string, fileName: string): { name: string; p
       const lonNode = pt.querySelector("LongitudeDegrees");
       const ele = pt.querySelector("AltitudeMeters")?.textContent;
       const hrNode = pt.querySelector("HeartRateBpm Value");
+      const cadNode = pt.querySelector("Cadence") || pt.querySelector("RunCadence");
       
       if (time && latNode?.textContent && lonNode?.textContent) {
         const pointData: Omit<TrackPoint, 'cummulativeDistance'> = {
@@ -51,6 +53,9 @@ export const parseTcx = (tcxString: string, fileName: string): { name: string; p
         };
         if (hrNode?.textContent) {
             pointData.hr = parseInt(hrNode.textContent, 10);
+        }
+        if (cadNode?.textContent) {
+            pointData.cad = parseInt(cadNode.textContent, 10);
         }
         points.push(pointData);
       }

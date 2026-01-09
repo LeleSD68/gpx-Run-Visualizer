@@ -7,11 +7,23 @@ interface ChangelogProps {
 
 const changelogData = [
      {
-        version: 'v1.12',
+        version: 'v1.17',
+        date: '2024-08-07',
+        changes: [
+            'Unificato il sistema "Aggiungi Promemoria" tra il Chatbot globale e il pannello di analisi della sessione.',
+            'Risolto un bug nel passaggio delle props che impediva il salvataggio dei programmi AI nel calendario dalla vista dettagliata.',
+            'Migliorato il parsing delle date suggerite dall\'AI per una sincronizzazione perfetta con il calendario.',
+            'Ottimizzata la reattività dei pulsanti di pianificazione su dispositivi mobile.'
+        ]
+    },
+     {
+        version: 'v1.16',
         date: '2024-08-06',
         changes: [
-            'Migliorata la tabella dei parziali nella vista dettagliata dell\'attività con l\'aggiunta di un grafico a barre orizzontale.',
-            'Le barre visualizzano il ritmo di ogni parziale, con colori che evidenziano i parziali più veloci (verde) e più lenti (rosso) per un\'analisi visiva immediata.'
+            'Migliorata la vista "Esplora Attività" con supporto a griglie da 1 a 6 colonne.',
+            'Aggiunta toolbar sticky nell\'explorer per ordinamento (Data, Distanza, Nome) e raggruppamento dinamico.',
+            'Riprogettata la Modalità Gara: ora i cursori dei runner mostrano il ritmo calcolato sugli ultimi 200 metri.',
+            'Effetto visivo "Percorso Dinamico": il tracciato si colora progressivamente al passaggio del runner virtuale.'
         ]
     },
      {
@@ -140,7 +152,7 @@ const Changelog: React.FC<ChangelogProps> = ({ onClose }) => {
                 className="bg-slate-800 text-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col"
                 onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside the modal
             >
-                <header className="flex items-center justify-between p-4 border-b border-slate-700 flex-shrink-0">
+                <header className="flex items-center justify-between p-4 border-b border-slate-700 flex-shrink-0 bg-slate-900">
                     <h2 id="changelog-title" className="text-xl font-bold text-cyan-400">Registro Modifiche</h2>
                     <button onClick={onClose} className="text-2xl leading-none p-1 rounded-full hover:bg-slate-700" aria-label="Close changelog">&times;</button>
                 </header>

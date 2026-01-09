@@ -131,6 +131,7 @@ export const updateStoredPRs = (track: Track, newRecords: Omit<PersonalRecord, '
              resultsForThisTrack[record.distance] = {
                 pr: prData,
                 isNew: false,
+                previousBest: existingPR.time // Return current PR time for comparison
             };
         }
     });

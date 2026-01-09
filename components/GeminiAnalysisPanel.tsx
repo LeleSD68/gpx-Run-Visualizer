@@ -103,17 +103,18 @@ La tua analisi dettagliata:`;
         };
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+            // Standardizing GoogleGenAI initialization
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const prompt = generatePrompt();
             
             const apiCall = () => ai.models.generateContent({
-                model: 'gemini-2.5-pro',
+                model: 'gemini-3-flash-preview',
                 contents: prompt,
             });
 
             const response: GenerateContentResponse = await retryWithBackoff(apiCall);
             window.gpxApp?.addTokens(response.usageMetadata?.totalTokenCount ?? 0);
-            setAnalysis(response.text);
+            setAnalysis(response.text || '');
         } catch (e) {
             setError('Impossibile ottenere l\'analisi dopo diversi tentativi. Riprova più tardi.');
             console.error(e);

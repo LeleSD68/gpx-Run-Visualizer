@@ -58,9 +58,13 @@ export const getTrackPointAtDistance = (track: Track, targetDistance: number): T
             const lon = p1.lon + (p2.lon - p1.lon) * ratio;
             const ele = p1.ele + (p2.ele - p1.ele) * ratio;
             const time = new Date(p1.time.getTime() + (p2.time.getTime() - p1.time.getTime()) * ratio);
-            const hr = (p1.hr !== undefined && p2.hr !== undefined) 
-                ? p1.hr + (p2.hr - p1.hr) * ratio 
-                : (p1.hr ?? p2.hr ?? undefined);
+            
+            let hr = undefined;
+            if (p1.hr !== undefined && p2.hr !== undefined) {
+                hr = Math.round(p1.hr + (p2.hr - p1.hr) * ratio);
+            } else {
+                hr = p1.hr ?? p2.hr ?? undefined;
+            }
             
             return { lat, lon, ele, time, cummulativeDistance: targetDistance, hr };
         }

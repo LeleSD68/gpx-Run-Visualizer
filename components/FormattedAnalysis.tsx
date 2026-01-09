@@ -8,21 +8,21 @@ interface FormattedAnalysisProps {
 
 const FormattedAnalysis: React.FC<FormattedAnalysisProps> = ({ text, className = "" }) => {
   // Se il testo è vuoto (es. all'inizio dello streaming), mostriamo uno spazio per mantenere il layout
-  if (!text) return <div className="min-h-[1em] animate-pulse bg-slate-600/20 rounded w-full"></div>;
+  if (!text) return <div className="min-h-[1.5em] animate-pulse bg-slate-700 rounded w-full"></div>;
 
   const paragraphs = text.split(/\n\n+/);
 
   return (
-    <div className={`space-y-3 text-slate-200 ${className}`}>
+    <div className={`space-y-4 text-white font-medium ${className}`}>
       {paragraphs.map((paragraph, pIdx) => {
         const lines = paragraph.split('\n');
         const isList = lines.length > 1 && lines.every(line => line.trim().startsWith('- ') || line.trim().startsWith('* '));
 
         if (isList) {
           return (
-            <ul key={pIdx} className="list-disc list-inside space-y-1 ml-2">
+            <ul key={pIdx} className="list-disc list-inside space-y-2 ml-2">
               {lines.map((line, lIdx) => (
-                <li key={lIdx} className="text-sm">
+                <li key={lIdx} className="text-[13px] sm:text-sm leading-relaxed text-slate-50">
                   {renderTextWithStyles(line.trim().substring(2))}
                 </li>
               ))}
@@ -31,7 +31,7 @@ const FormattedAnalysis: React.FC<FormattedAnalysisProps> = ({ text, className =
         }
 
         return (
-          <p key={pIdx} className="text-sm leading-relaxed whitespace-pre-wrap">
+          <p key={pIdx} className="text-[13px] sm:text-sm leading-relaxed whitespace-pre-wrap text-slate-50">
             {renderTextWithStyles(paragraph)}
           </p>
         );
@@ -45,10 +45,10 @@ function renderTextWithStyles(text: string) {
 
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={i} className="font-bold text-cyan-400">{part.slice(2, -2)}</strong>;
+      return <strong key={i} className="font-black text-cyan-400 drop-shadow-sm">{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith('*') && part.endsWith('*')) {
-      return <em key={i} className="italic text-slate-300">{part.slice(1, -1)}</em>;
+      return <em key={i} className="italic text-cyan-100 font-semibold">{part.slice(1, -1)}</em>;
     }
     return <span key={i}>{part}</span>;
   });
