@@ -2,10 +2,10 @@ import React, { useState, useMemo } from 'react';
 import { Track, PlannedWorkout, UserProfile } from '../types';
 import TrackPreview from './TrackPreview';
 import AiTrainingCoachPanel from './AiTrainingCoachPanel';
-// Added missing import for FormattedAnalysis component
 import FormattedAnalysis from './FormattedAnalysis';
+import RatingStars from './RatingStars';
 
-interface CalendarViewProps {
+interface DiaryViewProps {
     tracks: Track[];
     plannedWorkouts?: PlannedWorkout[];
     userProfile: UserProfile;
@@ -23,7 +23,7 @@ const SparklesIcon = () => (
     </svg>
 );
 
-const CalendarView: React.FC<CalendarViewProps> = ({ tracks, plannedWorkouts = [], userProfile, onClose, onSelectTrack, onDeletePlannedWorkout, onAddPlannedWorkout }) => {
+const DiaryView: React.FC<DiaryViewProps> = ({ tracks, plannedWorkouts = [], userProfile, onClose, onSelectTrack, onDeletePlannedWorkout, onAddPlannedWorkout }) => {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedWorkoutId, setSelectedWorkoutId] = useState<string | null>(null);
     const [showAiCoach, setShowAiCoach] = useState(false);
@@ -167,6 +167,11 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tracks, plannedWorkouts = [
                                                     <div className="w-full h-8 sm:h-10 bg-slate-900 rounded overflow-hidden relative flex-shrink-0">
                                                         <TrackPreview points={track.points} color={track.color} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
                                                         <div className="absolute bottom-0 right-0 bg-black/70 px-1 text-[8px] font-mono text-white rounded-tl">{track.distance.toFixed(1)}k</div>
+                                                        {track.rating !== undefined && (
+                                                            <div className="absolute top-0 right-0 p-0.5 bg-black/50 rounded-bl">
+                                                                <RatingStars rating={track.rating} reason={track.ratingReason} size="xs" />
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             ))}
@@ -204,7 +209,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tracks, plannedWorkouts = [
                         <header className="p-4 bg-slate-900 border-b border-slate-700 flex justify-between items-center">
                             <div className="flex items-center gap-2">
                                 <SparklesIcon />
-                                <h3 className="font-bold text-purple-400 uppercase tracking-widest text-sm">Programma Coach AI</h3>
+                                <h3 className="font-bold text-purple-400 uppercase tracking-widest text-sm">Programma Diario AI</h3>
                             </div>
                             <button onClick={() => setSelectedWorkoutId(null)} className="text-slate-500 hover:text-white text-xl">&times;</button>
                         </header>
@@ -221,7 +226,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tracks, plannedWorkouts = [
                             
                             <div className="bg-slate-700/30 p-4 rounded-xl border border-slate-600/50 mb-6">
                                 <div className="text-sm text-slate-200 leading-relaxed italic prose prose-invert prose-sm">
-                                    {/* Added missing component usage */}
                                     <FormattedAnalysis text={currentSelectedWorkout.description} />
                                 </div>
                             </div>
@@ -261,4 +265,4 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tracks, plannedWorkouts = [
     );
 };
 
-export default CalendarView;
+export default DiaryView;

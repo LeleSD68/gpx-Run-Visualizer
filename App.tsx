@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import MapDisplay from './components/MapDisplay';
 import LiveCommentary from './components/LiveCommentary';
-import { Track, RaceRunner, RaceResult, TrackStats, UserProfile, Toast, Split, TrackPoint, PlannedWorkout, ActivityType, Commentary } from './types';
+import { Track, RaceRunner, RaceResult, TrackStats, UserProfile, Toast, Split, TrackPoint, PlannedWorkout, ActivityType, Commentary, MonthlyStats } from './types';
 import { groupTracks } from './services/trackUtils';
 import TrackEditor from './components/TrackEditor';
 import RaceSummary from './components/RaceSummary';
@@ -15,16 +14,20 @@ import ToastContainer from './components/ToastContainer';
 import AnimationSummary from './components/AnimationSummary';
 import GuideModal from './components/GuideModal';
 import InitialChoiceModal from './components/InitialChoiceModal';
+import HomeModal from './components/HomeModal';
 import Tooltip from './components/Tooltip';
-import CalendarView from './components/CalendarView'; 
+import DiaryView from './components/DiaryView'; 
 import TrackPreview from './components/TrackPreview';
 import ResizablePanel from './components/ResizablePanel';
+import RatingStars from './components/RatingStars';
+import AiReviewModal from './components/AiReviewModal';
 import { calculateTrackStats } from './services/trackStatsService';
 import { parseGpx } from './services/gpxService';
 import { parseTcx } from './services/tcxService';
 import { saveTracksToDB, loadTracksFromDB, loadProfileFromDB, saveProfileToDB, exportAllData, importAllData, BackupData, loadPlannedWorkoutsFromDB, savePlannedWorkoutsToDB } from './services/dbService';
 import { generateSmartTitle } from './services/titleGenerator';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
+import { getTrackPointAtDistance } from './services/trackEditorUtils';
 
 const COLORS = [
   '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981',
@@ -43,14 +46,36 @@ const App: React.FC = () => {
   const [isDbInitialized, setIsDbInitialized] = useState(false);
   const [hoveredTrackId, setHoveredTrackId] = useState<string | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [listViewMode, setListViewMode] = useState<ListViewMode>('full');
+  const [listViewMode, setListViewMode] = useState<ListViewMode>('compact');
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
+  const [isAiRating, setIsAiRating] = useState(false);
+  const [reviewTrackId, setReviewTrackId] = useState<string | null>(null);
 
   useEffect(() => {
     const handleResize = () => setIsPortrait(window.innerHeight > window.innerWidth);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  const monthlyStats = useMemo((): MonthlyStats => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    
+    const monthTracks = tracks.filter(t => {
+      const d = t.points[0].time;
+      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    });
+
+    if (monthTracks.length === 0) return { totalDistance: 0, totalDuration: 0, activityCount: 0, avgPace: 0 };
+
+    const totalDistance = monthTracks.reduce((s, t) => s + t.distance, 0);
+    const totalDuration = monthTracks.reduce((s, t) => s + t.duration, 0);
+    const activityCount = monthTracks.length;
+    const avgPace = totalDistance > 0 ? (totalDuration / 1000 / 60) / totalDistance : 0;
+
+    return { totalDistance, totalDuration, activityCount, avgPace };
+  }, [tracks]);
 
   const [explorerCols, setExplorerCols] = useState(3);
   const [explorerSort, setExplorerSort] = useState<ExplorerSort>('date');
@@ -71,6 +96,7 @@ const App: React.FC = () => {
 
   const [animationTrackId, setAnimationTrackId] = useState<string | null>(null);
   const [animationProgress, setAnimationProgress] = useState(0); 
+  const [animationPace, setAnimationPace] = useState(0);
   const currentDistRef = useRef<number>(0);
   const [isAnimationPlaying, setIsAnimationPlaying] = useState(false);
   const [animationSpeed, setAnimationSpeed] = useState(10); 
@@ -86,8 +112,8 @@ const App: React.FC = () => {
   const [showChangelog, setShowChangelog] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
-  const [showInitialChoice, setShowInitialChoice] = useState(false);
-  const [showCalendar, setShowCalendar] = useState(false); 
+  const [showHome, setShowHome] = useState(false);
+  const [showDiary, setShowDiary] = useState(false); 
   const [showExplorer, setShowExplorer] = useState(false);
   const [showChatbot, setShowChatbot] = useState(false);
   const [isOnboarding, setIsOnboarding] = useState(false);
@@ -106,12 +132,6 @@ const App: React.FC = () => {
       setToasts(prev => [...prev, { id: Date.now(), message, type }]);
   }, []);
 
-  const checkProfileCompleteness = useCallback((profile: UserProfile) => {
-      if (!profile.age && !profile.maxHr && (!profile.goals || profile.goals[0] === 'none')) {
-          setShowProfile(true);
-      }
-  }, []);
-
   const loadAllFromDB = useCallback(async () => {
     try {
       const revivedTracks = await loadTracksFromDB();
@@ -122,12 +142,16 @@ const App: React.FC = () => {
       setPlannedWorkouts(revivedPlanned || []);
       setVisibleTrackIds(new Set(safeTracks.map(t => t.id)));
       if (revivedProfile) setUserProfile(revivedProfile);
-      if (safeTracks.length === 0) { setIsOnboarding(true); setShowGuide(true); } 
-      else if (revivedProfile) checkProfileCompleteness(revivedProfile);
-      else setShowProfile(true);
+      
+      // La schermata Home deve essere la prima cosa all'avvio
+      setShowHome(true);
+
+      if (safeTracks.length === 0) { 
+        setIsOnboarding(true); 
+      }
     } catch (e) { addToast("Errore caricamento dati.", "error"); } 
     finally { setIsDbInitialized(true); }
-  }, [addToast, checkProfileCompleteness]);
+  }, [addToast]);
 
   useEffect(() => { loadAllFromDB(); }, [loadAllFromDB]);
   useEffect(() => { if (isDbInitialized) { saveTracksToDB(tracks).catch(console.error); savePlannedWorkoutsToDB(plannedWorkouts).catch(console.error); } }, [tracks, plannedWorkouts, isDbInitialized]);
@@ -156,17 +180,6 @@ const App: React.FC = () => {
     return groups;
   }, [sortedExplorerTracks, explorerGroup]);
 
-  const handleGuideClose = () => {
-      setShowGuide(false);
-      if (isOnboarding) setShowInitialChoice(true); 
-  };
-
-  const handleStartNew = () => {
-      setShowInitialChoice(false);
-      if (!userProfile.age && !userProfile.maxHr) setShowProfile(true);
-      setIsOnboarding(false);
-  };
-
   const handleExportBackup = async () => {
     try {
       addToast("Preparazione backup...", "info");
@@ -188,7 +201,7 @@ const App: React.FC = () => {
             const data = JSON.parse(text) as BackupData;
             await importAllData(data); await loadAllFromDB();
             addToast("Backup ripristinato con successo.", "success");
-            if (showInitialChoice) { setShowInitialChoice(false); setIsOnboarding(false); }
+            setShowHome(false);
           } catch (err) { addToast("Errore durante il ripristino dei dati.", "error"); }
       };
       if (tracks.length > 0) {
@@ -202,7 +215,7 @@ const App: React.FC = () => {
   const handleRegenerateTitles = () => {
       if (tracks.length === 0) return;
       setConfirmDialog({
-          show: true, title: 'Rigenerare tutti i nomi?', message: 'Questo processo analizzerà tutte le tue tracce e assegnerà nuovi titoli intelligenti. I nomi manuali verranno sovrascritti.',
+          show: true, title: 'Rigenerare tutti i nomi?', message: 'Questo processo analizzerà tutte le tue tracce e assegnerà nuovi titoli intelligenti.',
           onConfirm: () => {
               const updatedTracks = tracks.map(track => {
                   const smartData = generateSmartTitle(track.points, track.distance, track.name);
@@ -213,6 +226,50 @@ const App: React.FC = () => {
       });
   };
 
+  const handleAiBulkRate = async () => {
+    const unrated = tracks.filter(t => t.rating === undefined);
+    if (unrated.length === 0) { addToast("Tutte le corse hanno già una valutazione AI.", "info"); return; }
+    setIsAiRating(true);
+    addToast(`Analisi di ${unrated.length} corse in corso...`, "info");
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const userGoals = userProfile.goals?.join(", ") || "Salute";
+        const userAge = userProfile.age || "N/D";
+        const runsData = unrated.map(t => {
+            const s = calculateTrackStats(t);
+            return { id: t.id, dist: t.distance.toFixed(2), pace: (s.movingAvgPace).toFixed(2), elev: Math.round(s.elevationGain), hr: s.avgHr ? Math.round(s.avgHr) : "N/D" };
+        });
+        const prompt = `Sei un esperto coach di corsa. Valuta oggettivamente le seguenti sessioni di allenamento con un punteggio da 1 a 5 stelle (intero). Per ogni corsa fornisci anche una brevissima motivazione (massimo 10-12 parole) che sia CHIARA, COMPLETA e CONCISA. Atleta di ${userAge} anni, obiettivi: ${userGoals}. Analizza questi dati: ${JSON.stringify(runsData)}. Rispondi esclusivamente con un array JSON di oggetti {id, rating, reason}.`;
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: { 
+                    type: Type.ARRAY, 
+                    items: { 
+                        type: Type.OBJECT, 
+                        properties: { 
+                            id: { type: Type.STRING }, 
+                            rating: { type: Type.NUMBER },
+                            reason: { type: Type.STRING } 
+                        }, 
+                        required: ["id", "rating", "reason"] 
+                    } 
+                }
+            }
+        });
+        const ratings: {id: string, rating: number, reason: string}[] = JSON.parse(response.text || '[]');
+        const updatedTracks = tracks.map(t => {
+            const found = ratings.find(r => r.id === t.id);
+            if (found) return { ...t, rating: Math.max(1, Math.min(5, found.rating)), ratingReason: found.reason };
+            return t;
+        });
+        setTracks(updatedTracks); addToast(`Valutazione completata per ${ratings.length} attività!`, "success");
+    } catch (e) { console.error(e); addToast("Errore durante la valutazione AI.", "error"); } 
+    finally { setIsAiRating(false); }
+  };
+
   const updateSingleAnimation = useCallback((time: number) => {
     if (!isAnimationPlaying || !animationTrackId) return;
     if (lastFrameTimeRef.current === 0) { lastFrameTimeRef.current = time; animationRef.current = requestAnimationFrame(updateSingleAnimation); return; }
@@ -221,9 +278,17 @@ const App: React.FC = () => {
     if (!track) return;
     const kmPerMs = (animationSpeed * 5) / 3600000; 
     let newDist = currentDistRef.current + (kmPerMs * deltaTime);
-    if (newDist >= track.distance) { newDist = track.distance; setIsAnimationPlaying(false); setShowSummaryMode(true); }
-    currentDistRef.current = newDist; setAnimationProgress(newDist);
-    animationRef.current = requestAnimationFrame(updateSingleAnimation);
+    if (newDist >= track.distance) { newDist = track.distance; setIsAnimationPlaying(false); setShowSummaryMode(true); setFitBoundsCounter(c => c + 1); }
+    if (newDist > 0.1) {
+        const pCurrent = getTrackPointAtDistance(track, newDist);
+        const pPrev = getTrackPointAtDistance(track, Math.max(0, newDist - 0.1));
+        if (pCurrent && pPrev) {
+            const dDist = pCurrent.cummulativeDistance - pPrev.cummulativeDistance;
+            const timeMin = (pCurrent.time.getTime() - pPrev.time.getTime()) / 60000;
+            if (dDist > 0) setAnimationPace(timeMin / dDist);
+        }
+    } else setAnimationPace(0);
+    currentDistRef.current = newDist; setAnimationProgress(newDist); animationRef.current = requestAnimationFrame(updateSingleAnimation);
   }, [isAnimationPlaying, animationTrackId, animationSpeed, tracks]);
 
   useEffect(() => {
@@ -232,7 +297,7 @@ const App: React.FC = () => {
   }, [isAnimationPlaying, updateSingleAnimation]);
 
   const startSingleAnimation = (trackId: string) => {
-    setSimulationState('idle'); setAnimationTrackId(trackId); currentDistRef.current = 0; setAnimationProgress(0); setIsAnimationPlaying(true); 
+    setSimulationState('idle'); setAnimationTrackId(trackId); currentDistRef.current = 0; setAnimationProgress(0); setAnimationPace(0); setIsAnimationPlaying(true); 
     setVisibleTrackIds(new Set([trackId])); setShowSummaryMode(false); setIsMobileSidebarOpen(false); lastFrameTimeRef.current = 0;
     const track = tracks.find(t => t.id === trackId);
     if (track) {
@@ -240,6 +305,7 @@ const App: React.FC = () => {
         setFastestSplitForAnimation(stats.splits.find(s => s.isFastest) || null);
         setFitBoundsCounter(c => c + 1);
     }
+    setDetailTrackId(null);
   };
 
   const closeAnimationAndReturn = () => {
@@ -332,6 +398,7 @@ const App: React.FC = () => {
     const selectedTracks = tracks.filter(t => raceSelectionIds.has(t.id));
     const statsMap = new Map<string, TrackStats>();
     selectedTracks.forEach(t => statsMap.set(t.id, calculateTrackStats(t)));
+    // FIX: Changed track.color to t.color because 'track' is not defined in this scope.
     setRacerStats(statsMap); setRaceRunners(selectedTracks.map(t => ({ trackId: t.id, position: t.points[0], color: t.color, pace: 0 })));
     setSimulationState('running'); setFitBoundsCounter(c => c + 1); setIsMobileSidebarOpen(false);
   };
@@ -358,7 +425,6 @@ const App: React.FC = () => {
         const updated = groupTracks([...tracks, ...newTracks]);
         setTracks(updated); setVisibleTrackIds(new Set(updated.map(t => t.id)));
         addToast(`Caricate ${newTracks.length} attività.`, 'success');
-        if (!userProfile.age && !userProfile.maxHr) setShowProfile(true);
     }
   };
 
@@ -388,35 +454,47 @@ const App: React.FC = () => {
       });
   };
   const handleMapPointClick = (point: TrackPoint) => { const track = tracks.find(t => t.points.some(p => p.time.getTime() === point.time.getTime())); if (track) handleToggleRaceSelection(track.id); };
-  const handleTrackHoverFromMap = (trackId: string | null) => setHoveredTrackId(trackId);
-  const handleAddPlannedWorkout = (workout: PlannedWorkout) => { setPlannedWorkouts(prev => [...prev, workout]); addToast("Allenamento aggiunto al calendario.", "success"); };
+  const handleAddPlannedWorkout = (workout: PlannedWorkout) => { setPlannedWorkouts(prev => [...prev, workout]); addToast("Allenamento aggiunto al diario.", "success"); };
   const handleDeletePlannedWorkout = (id: string) => { setPlannedWorkouts(prev => prev.filter(w => w.id !== id)); addToast("Promemoria rimosso.", "info"); };
 
   if (tracksToEdit.length > 0) return (<div className="bg-slate-900 text-white min-h-screen"><ToastContainer toasts={toasts} setToasts={setToasts} /><TrackEditor initialTracks={tracksToEdit} onExit={handleEditorExit} addToast={addToast} /></div>);
-  if (showCalendar) return (<div className="bg-slate-900 text-white min-h-screen"><ToastContainer toasts={toasts} setToasts={setToasts} /><CalendarView tracks={tracks} plannedWorkouts={plannedWorkouts} onClose={() => setShowCalendar(false)} onSelectTrack={(trackId) => { setDetailTrackId(trackId); setShowCalendar(false); }} onDeletePlannedWorkout={handleDeletePlannedWorkout} /></div>);
+  if (showDiary) return (<div className="bg-slate-900 text-white min-h-screen"><ToastContainer toasts={toasts} setToasts={setToasts} /><DiaryView tracks={tracks} plannedWorkouts={plannedWorkouts} userProfile={userProfile} onClose={() => setShowDiary(false)} onSelectTrack={(trackId) => { setDetailTrackId(trackId); setShowDiary(false); }} onDeletePlannedWorkout={handleDeletePlannedWorkout} onAddPlannedWorkout={handleAddPlannedWorkout} /></div>);
   if (detailTrackId) {
       const track = tracks.find(t => t.id === detailTrackId);
-      if (track) return (<div className="bg-slate-900 text-white min-h-screen"><TrackDetailView track={track} userProfile={userProfile} onExit={() => setDetailTrackId(null)} allHistory={tracks} onUpdateTrackMetadata={handleUpdateTrackMetadata} onAddPlannedWorkout={handleAddPlannedWorkout} /></div>);
+      if (track) return (
+          <div className="bg-slate-900 text-white min-h-screen">
+            <ToastContainer toasts={toasts} setToasts={setToasts} />
+            <TrackDetailView track={track} userProfile={userProfile} onExit={() => setDetailTrackId(null)} allHistory={tracks} onUpdateTrackMetadata={handleUpdateTrackMetadata} onAddPlannedWorkout={handleAddPlannedWorkout} onStartAnimation={startSingleAnimation} onOpenReview={(id) => setReviewTrackId(id)} />
+            {reviewTrackId && (
+                <AiReviewModal 
+                    track={tracks.find(t => t.id === reviewTrackId)!} 
+                    userProfile={userProfile} 
+                    onClose={() => setReviewTrackId(null)} 
+                />
+            )}
+          </div>
+      );
   }
 
   const currentAnimatedTrack = animationTrackId ? tracks.find(t => t.id === animationTrackId) : null;
   const animationTrackStats = currentAnimatedTrack ? calculateTrackStats(currentAnimatedTrack) : null;
 
   const sidebarContent = (
-    <Sidebar tracks={tracks} onFileUpload={handleFileUpload} visibleTrackIds={visibleTrackIds} onToggleVisibility={(id) => setVisibleTrackIds(prev => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s; })} raceSelectionIds={raceSelectionIds} onToggleRaceSelection={handleToggleRaceSelection} onDeselectAll={() => { setRaceSelectionIds(new Set()); setVisibleTrackIds(new Set(tracks.map(t => t.id))); }} onSelectAll={() => { const allIds = new Set(tracks.map(t => t.id)); setRaceSelectionIds(allIds); setVisibleTrackIds(allIds); }} onStartRace={startRace} onGoToEditor={() => { const selected = tracks.filter(t => raceSelectionIds.has(t.id)); if (selected.length > 0) { setTracksToEdit(selected); setIsMobileSidebarOpen(false); } else if (tracks.length > 0) { setTracksToEdit([tracks[0]]); setIsMobileSidebarOpen(false); } }} onStartVeo={() => { const selected = tracks.find(t => raceSelectionIds.has(t.id)); if (selected) startSingleAnimation(selected.id); else if (tracks.length > 0) startSingleAnimation(tracks[0].id); }} onPauseRace={() => setSimulationState('paused')} onResumeRace={() => { setSimulationState('running'); lastFrameTimeRef.current = performance.now(); }} onResetRace={() => { setSimulationState('idle'); setSimulationTime(0); setRaceResults([]); setRaceRunners(null); setIsMobileSidebarOpen(true); }} simulationState={simulationState} simulationTime={simulationTime} onTrackHoverStart={(id) => setHoveredTrackId(id)} onTrackHoverEnd={() => setHoveredTrackId(null)} hoveredTrackId={hoveredTrackId} raceProgress={raceProgress} simulationSpeed={simulationSpeed} onSpeedChange={setSimulationSpeed} lapTimes={new Map()} sortOrder={sortOrder} onSortChange={setSortOrder} onDeleteTrack={(id) => setTracks(prev => prev.filter(t => t.id !== id))} onDeleteSelected={handleBulkDelete} onViewDetails={(id) => setDetailTrackId(id)} onStartAnimation={startSingleAnimation} raceRanks={raceRanks} runnerSpeeds={runnerSpeeds} runnerDistances={runnerDistances} runnerGapsToLeader={runnerGapsToLeader} collapsedGroups={collapsedGroups} onToggleGroup={(id) => setCollapsedGroups(prev => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s; })} onToggleSidebarMobile={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)} onOpenChangelog={() => setShowChangelog(true)} onOpenProfile={() => setShowProfile(true)} onOpenGuide={() => setShowGuide(true)} onOpenCalendar={() => setShowCalendar(true)} tokenCount={0} onExportBackup={handleExportBackup} onImportBackup={handleImportBackup} onCloseMobile={() => setIsMobileSidebarOpen(false)} onUpdateTrackMetadata={handleUpdateTrackMetadata} onShowGroup={handleShowGroup} onRegenerateTitles={handleRegenerateTitles} onToggleExplorer={() => setShowExplorer(!showExplorer)} showExplorer={showExplorer} listViewMode={listViewMode} onListViewModeChange={setListViewMode} />
+    <Sidebar monthlyStats={monthlyStats} tracks={tracks} onFileUpload={handleFileUpload} visibleTrackIds={visibleTrackIds} onToggleVisibility={(id) => setVisibleTrackIds(prev => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s; })} raceSelectionIds={raceSelectionIds} onToggleRaceSelection={handleToggleRaceSelection} onDeselectAll={() => { setRaceSelectionIds(new Set()); setVisibleTrackIds(new Set(tracks.map(t => t.id))); }} onSelectAll={() => { const allIds = new Set(tracks.map(t => t.id)); setRaceSelectionIds(allIds); setVisibleTrackIds(allIds); }} onStartRace={startRace} onGoToEditor={() => { const selected = tracks.filter(t => raceSelectionIds.has(t.id)); if (selected.length > 0) { setTracksToEdit(selected); setIsMobileSidebarOpen(false); } else if (tracks.length > 0) { setTracksToEdit([tracks[0]]); setIsMobileSidebarOpen(false); } }} onStartVeo={() => { const selected = tracks.find(t => raceSelectionIds.has(t.id)); if (selected) startSingleAnimation(selected.id); else if (tracks.length > 0) startSingleAnimation(tracks[0].id); }} onPauseRace={() => setSimulationState('paused')} onResumeRace={() => { setSimulationState('running'); lastFrameTimeRef.current = performance.now(); }} onResetRace={() => { setSimulationState('idle'); setSimulationTime(0); setRaceResults([]); setRaceRunners(null); setIsMobileSidebarOpen(true); }} simulationState={simulationState} simulationTime={simulationTime} onTrackHoverStart={(id) => setHoveredTrackId(id)} onTrackHoverEnd={() => setHoveredTrackId(null)} hoveredTrackId={hoveredTrackId} raceProgress={raceProgress} simulationSpeed={simulationSpeed} onSpeedChange={setSimulationSpeed} lapTimes={new Map()} sortOrder={sortOrder} onSortChange={setSortOrder} onDeleteTrack={(id) => setTracks(prev => prev.filter(t => t.id !== id))} onDeleteSelected={handleBulkDelete} onViewDetails={(id) => setDetailTrackId(id)} onStartAnimation={startSingleAnimation} raceRanks={raceRanks} runnerSpeeds={runnerSpeeds} runnerDistances={runnerDistances} runnerGapsToLeader={runnerGapsToLeader} collapsedGroups={collapsedGroups} onToggleGroup={(id) => setCollapsedGroups(prev => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s; })} onToggleSidebarMobile={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)} onOpenChangelog={() => setShowChangelog(true)} onOpenProfile={() => setShowProfile(true)} onOpenGuide={() => setShowGuide(true)} onOpenDiary={() => setShowDiary(true)} tokenCount={0} onExportBackup={handleExportBackup} onImportBackup={handleImportBackup} onCloseMobile={() => setIsMobileSidebarOpen(false)} onUpdateTrackMetadata={handleUpdateTrackMetadata} onShowGroup={handleShowGroup} onRegenerateTitles={handleRegenerateTitles} onToggleExplorer={() => setShowExplorer(!showExplorer)} showExplorer={showExplorer} listViewMode={listViewMode} onListViewModeChange={setListViewMode} onAiBulkRate={handleAiBulkRate} isAiRating={isAiRating} onOpenReview={(id) => setReviewTrackId(id)} />
   );
 
   const mapContent = (
     <div className="h-full w-full relative group">
-        <MapDisplay tracks={tracks} visibleTrackIds={visibleTrackIds} raceRunners={raceRunners} hoveredTrackId={hoveredTrackId} runnerSpeeds={runnerSpeeds} animationTrack={currentAnimatedTrack} animationProgress={animationProgress} onExitAnimation={closeAnimationAndReturn} isAnimationPlaying={isAnimationPlaying} onToggleAnimationPlay={() => setIsAnimationPlaying(!isAnimationPlaying)} onAnimationProgressChange={p => { currentDistRef.current = p; setAnimationProgress(p); }} animationSpeed={animationSpeed} onAnimationSpeedChange={setAnimationSpeed} showSummaryMode={showSummaryMode} fastestSplitForAnimation={fastestSplitForAnimation} animationHighlight={selectedSplit || animationHighlight} fitBoundsCounter={fitBoundsCounter} onPointClick={handleMapPointClick} onTrackHover={handleTrackHoverFromMap} />
-        
+        <MapDisplay tracks={tracks} visibleTrackIds={visibleTrackIds} raceRunners={raceRunners} hoveredTrackId={hoveredTrackId} runnerSpeeds={runnerSpeeds} animationTrack={currentAnimatedTrack} animationProgress={animationProgress} animationPace={animationPace} onExitAnimation={closeAnimationAndReturn} isAnimationPlaying={isAnimationPlaying} onToggleAnimationPlay={() => setIsAnimationPlaying(!isAnimationPlaying)} onAnimationProgressChange={p => { currentDistRef.current = p; setAnimationProgress(p); }} animationSpeed={animationSpeed} onAnimationSpeedChange={setAnimationSpeed} showSummaryMode={showSummaryMode} fastestSplitForAnimation={fastestSplitForAnimation} animationHighlight={selectedSplit || animationHighlight} fitBoundsCounter={fitBoundsCounter} onPointClick={handleMapPointClick} onTrackHover={(id) => setHoveredTrackId(id)} />
         {!showSummaryMode && !animationTrackId && (
-            <div className="absolute bottom-6 right-6 z-[1000] pointer-events-auto">
+            <div className="absolute bottom-6 right-6 z-[1000] pointer-events-auto flex flex-col items-end gap-3">
+                 <Tooltip text="Menu Hub" subtext="Torna alla navigazione principale." position="left">
+                    <button onClick={() => setShowHome(true)} className="flex items-center justify-center w-12 h-12 rounded-full shadow-2xl active:scale-95 transition-all bg-slate-800 border border-slate-700 text-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M9.293 2.293a1 1 0 0 1 1.414 0l7 7A1 1 0 0 1 17 11h-1v6a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1v-3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-6H3a1 1 0 0 1-.707-1.707l7-7Z" clipRule="evenodd" /></svg>
+                    </button>
+                </Tooltip>
                 <Tooltip text="Coach AI" subtext="Analisi globale dello storico." position="left">
-                    <button 
-                        onClick={() => setShowChatbot(!showChatbot)} 
-                        className={`flex items-center gap-2 px-5 py-3 rounded-full shadow-2xl active:scale-95 transition-all font-bold uppercase tracking-wider text-xs border border-cyan-400/30 ${showChatbot ? 'bg-cyan-700 text-white border-cyan-400' : 'bg-cyan-600 hover:bg-cyan-500 text-white'}`}
-                    >
+                    <button onClick={() => setShowChatbot(!showChatbot)} className={`flex items-center gap-2 px-5 py-3 rounded-full shadow-2xl active:scale-95 transition-all font-bold uppercase tracking-wider text-xs border border-cyan-400/30 ${showChatbot ? 'bg-cyan-700 text-white border-cyan-400' : 'bg-cyan-600 hover:bg-cyan-500 text-white'}`}>
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-6"><path d="M10.89 2.11a.75.75 0 0 0-1.78 0l-1.5 3.22-3.53.51a.75.75 0 0 0-.42 1.28l2.55 2.49-.6 3.52a.75.75 0 0 0 1.09.79l3.16-1.66 3.16 1.66a.75.75 0 0 0 1.09-.79l-.6-3.52 2.55-2.49a.75.75 0 0 0-.42-1.28l-3.53-.51-1.5-3.22Z" /></svg>
                         <span>Coach AI</span>
                     </button>
@@ -430,32 +508,23 @@ const App: React.FC = () => {
     <div className="flex h-screen bg-slate-900 text-slate-100 overflow-hidden font-sans relative">
       <ToastContainer toasts={toasts} setToasts={setToasts} />
       <main className="flex-grow flex flex-col sm:flex-row h-full relative overflow-hidden">
-        {/* DESKTOP LAYOUT CON CHAT RESIZABLE VERSO SINISTRA */}
         <div className="hidden sm:flex h-full w-full">
             <ResizablePanel direction="vertical" initialSize={320} minSize={250} className={showSummaryMode ? 'hidden' : ''}>
                 {sidebarContent}
-                
-                {/* AREA CENTRALE E CHAT RESIZABLE */}
                 <div className="h-full flex flex-row-reverse min-w-0 flex-grow bg-slate-900">
                     {showChatbot ? (
                         <ResizablePanel direction="vertical" initialSize={400} minSize={300} minSizeSecondary={400}>
                             <div className="h-full w-full border-l border-slate-700 animate-fade-in-right shadow-2xl overflow-hidden">
                                 <Chatbot tracksToAnalyze={tracks} userProfile={userProfile} onClose={() => setShowChatbot(false)} onAddPlannedWorkout={handleAddPlannedWorkout} isSidebar />
                             </div>
-                            <div className="h-full w-full relative">
-                                {mapContent}
-                            </div>
+                            <div className="h-full w-full relative">{mapContent}</div>
                         </ResizablePanel>
                     ) : (
-                        <div className="h-full w-full relative">
-                            {mapContent}
-                        </div>
+                        <div className="h-full w-full relative">{mapContent}</div>
                     )}
                 </div>
             </ResizablePanel>
         </div>
-
-        {/* MOBILE LAYOUT */}
         <div className="sm:hidden flex flex-col h-full w-full relative">
             {isMobileSidebarOpen && !showSummaryMode ? (
                 <div className="h-full w-full overflow-hidden">
@@ -468,25 +537,13 @@ const App: React.FC = () => {
                 <div className="h-full w-full relative">
                     {mapContent}
                     {!isMobileSidebarOpen && simulationState === 'idle' && !animationTrackId && (
-                        <button 
-                            onClick={() => { setIsMobileSidebarOpen(true); setFitBoundsCounter(c => c + 1); }} 
-                            className="absolute top-2 left-2 z-[1001] bg-slate-800 p-3 rounded-lg shadow-xl border border-slate-700 text-cyan-400 active:bg-slate-700 transition-colors"
-                        >
+                        <button onClick={() => { setIsMobileSidebarOpen(true); setFitBoundsCounter(c => c + 1); }} className="absolute top-2 left-2 z-[1001] bg-slate-800 p-3 rounded-lg shadow-xl border border-slate-700 text-cyan-400 active:bg-slate-700 transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
                         </button>
-                    )}
-                    {showChatbot && (
-                        <div className="absolute inset-0 z-[5000] bg-black/60 flex items-end sm:items-center justify-center p-2">
-                            <div className="w-full h-[80vh] animate-fade-in-up">
-                                <Chatbot tracksToAnalyze={tracks} userProfile={userProfile} onClose={() => setShowChatbot(false)} onAddPlannedWorkout={handleAddPlannedWorkout} isStandalone />
-                            </div>
-                        </div>
                     )}
                 </div>
             )}
         </div>
-
-        {/* OVERLAYS ESPLORER, COMMENTARY, ETC */}
         <div className="absolute inset-0 pointer-events-none z-[4000]">
             {showExplorer && (
                   <div className="absolute inset-0 z-[4000] flex items-center justify-center pointer-events-none p-2 sm:p-6">
@@ -499,7 +556,7 @@ const App: React.FC = () => {
                                     {[1, 2, 3, 4, 5, 6].map(num => (<button key={num} onClick={() => setExplorerCols(num)} className={`w-8 h-8 rounded flex items-center justify-center text-xs font-black transition-all ${explorerCols === num ? 'bg-cyan-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-200'}`}>{num}</button>))}
                                 </div>
                               </div>
-                              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                              <div className="flex flex-wrap items-center gap-2 w-full sm:auto">
                                   <select value={explorerSort} onChange={e => setExplorerSort(e.target.value as ExplorerSort)} className="bg-slate-900 border border-slate-700 text-white text-[10px] font-bold uppercase px-3 py-2 rounded-lg outline-none focus:border-cyan-500"><option value="date">Ordina: Data</option><option value="distance">Ordina: Distanza</option><option value="name">Ordina: Nome</option></select>
                                   <select value={explorerGroup} onChange={e => setExplorerGroup(e.target.value as ExplorerGroup)} className="bg-slate-900 border border-slate-700 text-white text-[10px] font-bold uppercase px-3 py-2 rounded-lg outline-none focus:border-cyan-500"><option value="none">Raggruppa: Nessuno</option><option value="activity">Raggruppa: Tipo</option><option value="month">Raggruppa: Mese</option></select>
                                   <button onClick={() => setShowExplorer(false)} className="bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white px-3 py-2 rounded-lg transition-all text-xs font-black ml-auto">&times; CHIUDI</button>
@@ -511,9 +568,20 @@ const App: React.FC = () => {
                                       {explorerGroup !== 'none' && (<h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-3"><span className="text-cyan-400">{groupName}</span><div className="h-px bg-slate-800 flex-grow"></div><span className="bg-slate-800 px-2 py-0.5 rounded text-[10px] text-slate-400">{groupTracks.length}</span></h3>)}
                                       <div className="grid gap-4 sm:gap-6" style={{ gridTemplateColumns: `repeat(${explorerCols}, minmax(0, 1fr))` }}>
                                           {groupTracks.map(track => (
-                                              <div key={track.id} onClick={() => { setDetailTrackId(track.id); setShowExplorer(false); }} className={`bg-slate-800/80 border border-slate-700 rounded-xl hover:border-cyan-500 hover:bg-slate-700 hover:shadow-[0_0_30px_-5px_rgba(6,182,212,0.3)] transition-all cursor-pointer group flex flex-col overflow-hidden ${explorerCols === 1 ? 'flex-row items-center gap-6 p-4' : 'p-3 sm:p-4'}`}>
+                                              <div key={track.id} onClick={() => { setDetailTrackId(track.id); setShowExplorer(false); }} className={`bg-slate-800/80 border border-slate-700 rounded-xl hover:border-cyan-500 hover:bg-slate-700 hover:shadow-[0_0_30px_-5px_rgba(6,182,212,0.3)] transition-all cursor-pointer group flex flex-col ${explorerCols === 1 ? 'flex-row items-center gap-6 p-4' : 'p-3 sm:p-4'}`}>
                                                   <div className={`bg-slate-950 rounded-lg overflow-hidden relative shrink-0 ${explorerCols === 1 ? 'w-48 aspect-video' : 'w-full aspect-[16/10] mb-4'}`}><TrackPreview points={track.points} color={track.color} className="w-full h-full object-contain p-4 opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500" /><div className="absolute top-2 right-2 bg-black/80 px-2 py-1 rounded text-[10px] font-black font-mono text-cyan-400 border border-cyan-900/50">{track.distance.toFixed(2)} km</div></div>
-                                                  <div className="flex-grow min-w-0"><h3 className={`font-black text-slate-50 truncate group-hover:text-cyan-400 transition-colors uppercase tracking-tight ${explorerCols > 4 ? 'text-[10px]' : 'text-sm'}`}>{track.name}</h3><div className={`flex justify-between items-center mt-2 text-slate-500 font-bold uppercase tracking-wider ${explorerCols > 4 ? 'text-[8px]' : 'text-[10px]'}`}><div className="flex items-center gap-1.5"><span>{new Date(track.points[0].time).toLocaleDateString()}</span></div><span className="text-cyan-800 bg-cyan-400/5 px-2 py-0.5 rounded border border-cyan-900/30">{track.activityType || 'Corsa'}</span></div></div>
+                                                  <div className="flex-grow min-w-0">
+                                                      <h3 className={`font-black text-slate-50 truncate group-hover:text-cyan-400 transition-colors uppercase tracking-tight ${explorerCols > 4 ? 'text-[10px]' : 'text-sm'}`}>{track.name}</h3>
+                                                      <div className="my-1">
+                                                          <RatingStars 
+                                                            rating={track.rating} 
+                                                            reason={track.ratingReason} 
+                                                            size={explorerCols > 4 ? "xs" : "sm"} 
+                                                            onDetailClick={(e) => { e.stopPropagation(); setReviewTrackId(track.id); }}
+                                                          />
+                                                      </div>
+                                                      <div className={`flex justify-between items-center mt-2 text-slate-500 font-bold uppercase tracking-wider ${explorerCols > 4 ? 'text-[8px]' : 'text-[10px]'}`}><div className="flex items-center gap-1.5"><span>{new Date(track.points[0].time).toLocaleDateString()}</span></div><span className="text-cyan-800 bg-cyan-400/5 px-2 py-0.5 rounded border border-cyan-900/30">{track.activityType || 'Corsa'}</span></div>
+                                                  </div>
                                               </div>
                                           ))}
                                       </div>
@@ -526,21 +594,44 @@ const App: React.FC = () => {
               {simulationState === 'running' && (<LiveCommentary messages={liveCommentary} isLoading={isCommentaryLoading} />)}
               {showSummaryMode && animationTrackStats && (<AnimationSummary trackStats={animationTrackStats} userProfile={userProfile} onClose={closeAnimationAndReturn} />)}
         </div>
-
+        {showChatbot && (
+            <div className="fixed inset-0 z-[5000] bg-slate-900 sm:bg-black/60 sm:flex sm:items-center sm:justify-center sm:p-4">
+                <div className="w-full h-full sm:w-auto sm:h-auto sm:max-w-xl sm:max-h-[85vh] animate-fade-in-up">
+                    <Chatbot tracksToAnalyze={tracks} userProfile={userProfile} onClose={() => setShowChatbot(false)} onAddPlannedWorkout={handleAddPlannedWorkout} isStandalone />
+                </div>
+            </div>
+        )}
         {simulationState === 'finished' && raceResults.length > 0 && (<div className="absolute inset-0 z-[5000]"><RaceSummary results={raceResults} racerStats={racerStats} onClose={() => { setSimulationState('idle'); setRaceResults([]); setIsMobileSidebarOpen(true); }} userProfile={userProfile} tracks={tracks} /></div>)}
+        {reviewTrackId && !detailTrackId && (
+            <AiReviewModal 
+                track={tracks.find(t => t.id === reviewTrackId)!} 
+                userProfile={userProfile} 
+                onClose={() => setReviewTrackId(null)} 
+            />
+        )}
       </main>
 
       {showChangelog && <Changelog onClose={() => setShowChangelog(false)} />}
       {showProfile && (<UserProfileModal onClose={() => setShowProfile(false)} onSave={p => { setUserProfile(p); saveProfileToDB(p); }} currentProfile={userProfile} isWelcomeMode={isOnboarding} tracks={tracks} />)}
-      {showGuide && <GuideModal onClose={handleGuideClose} />}
-      {showInitialChoice && (<InitialChoiceModal onImportBackup={handleImportBackup} onStartNew={handleStartNew} onClose={() => setShowInitialChoice(false)} />)}
+      {showGuide && <GuideModal onClose={() => setShowGuide(false)} />}
+      {isOnboarding && <InitialChoiceModal onImportBackup={handleImportBackup} onStartNew={() => setIsOnboarding(false)} onClose={() => setIsOnboarding(false)} />}
+      
+      {showHome && (
+          <HomeModal 
+            trackCount={tracks.length}
+            onOpenDiary={() => { setShowDiary(true); setShowHome(false); }}
+            onOpenExplorer={() => { setShowExplorer(true); setShowHome(false); }}
+            onOpenHelp={() => { setShowGuide(true); setShowHome(false); }}
+            onImportBackup={handleImportBackup}
+            onClose={() => setShowHome(false)}
+          />
+      )}
 
       {confirmDialog.show && (<div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[7000] p-4"><div className="bg-slate-800 p-6 rounded-xl border border-slate-600 max-w-sm w-full shadow-2xl"><h3 className="text-xl font-bold mb-2 text-white">{confirmDialog.title}</h3><p className="text-slate-200 mb-6 font-medium">{confirmDialog.message}</p><div className="flex space-x-3"><button onClick={() => setConfirmDialog(p => ({...p, show: false}))} className="flex-1 bg-slate-700 hover:bg-slate-600 p-2 rounded text-white font-bold">Annulla</button><button onClick={confirmDialog.onConfirm} className="flex-1 bg-red-600 hover:bg-red-500 p-2 rounded text-white font-bold">Conferma</button></div></div></div>)}
-      
       <style>{`
         @keyframes fade-in-right { from { opacity: 0; transform: translateX(50px); } to { opacity: 1; transform: translateX(0); } }
         .animate-fade-in-right { animation: fade-in-right 0.3s ease-out forwards; }
-        @keyframes fade-in-up { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fade-in-up { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateX(0); } }
         .animate-fade-in-up { animation: fade-in-up 0.3s ease-out forwards; }
       `}</style>
     </div>

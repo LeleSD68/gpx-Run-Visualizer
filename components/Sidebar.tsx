@@ -1,9 +1,9 @@
-
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Track, ActivityType } from '../types';
 import TrackPreview from './TrackPreview';
 import RaceLeaderboard from './RacePaceBar';
 import Tooltip from './Tooltip';
+import RatingStars from './RatingStars';
 
 interface SidebarProps {
   tracks: Track[];
@@ -44,7 +44,7 @@ interface SidebarProps {
   onOpenChangelog: () => void;
   onOpenProfile: () => void;
   onOpenGuide: () => void;
-  onOpenCalendar: () => void; 
+  onOpenDiary: () => void; 
   tokenCount: number;
   onExportBackup: () => void;
   onImportBackup: (file: File) => void;
@@ -57,6 +57,9 @@ interface SidebarProps {
   listViewMode: 'full' | 'compact' | 'minimal';
   onListViewModeChange: (mode: 'full' | 'compact' | 'minimal') => void;
   onToggleSidebarMobile?: () => void;
+  onAiBulkRate?: () => void;
+  isAiRating?: boolean;
+  onOpenReview?: (trackId: string) => void;
 }
 
 // Icons
@@ -71,9 +74,9 @@ const StarIcon = ({ filled }: { filled?: boolean }) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.831-4.401Z" />
     </svg>
 );
-const CalendarIcon = () => (
+const DiaryIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path fillRule="evenodd" d="M5.75 2a.75.75 0 0 1 .75.75V4h7V2.75a.75.75 0 0 1 1.5 0V4h.25A2.75 2.75 0 0 1 18 6.75v8.5A2.75 2.75 0 0 1 15.25 18H4.75A2.75 2.75 0 0 1 2 15.25v-8.5A2.75 2.75 0 0 1 4.75 4H5V2.75A.75.75 0 0 1 5.75 2Zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75Z" clipRule="evenodd" />
+        <path fillRule="evenodd" d="M4.5 2A1.5 1.5 0 0 0 3 3.5v13A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 11.38 2H4.5Zm10 14.5h-9a.5.5 0 0 1-.5-.5v-13a.5.5 0 0 1 .5-.5H11v3.5A1.5 1.5 0 0 0 12.5 7H16v9a.5.5 0 0 1-.5.5ZM16 5.5l-3.5-3.5V5.5H16Z" clipRule="evenodd" />
     </svg>
 );
 const UserIcon = () => (
@@ -127,6 +130,12 @@ const StopIcon = () => (
     </svg>
 );
 
+const WandIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+        <path d="M21 9.337a3.5 3.5 0 1 1-5 0l-8 8a3.5 3.5 0 1 1-5 0 3.5 3.5 0 0 1 0-5l8-8a3.5 3.5 0 0 1 5 0l5 5ZM17.414 7.923l2.828 2.828-8.485 8.485-2.828-2.828 8.485-8.485Z" />
+    </svg>
+);
+
 const LayoutIcons = {
     full: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5"><path d="M2 4.25A2.25 2.25 0 0 1 4.25 2h11.5A2.25 2.25 0 0 1 18 4.25v11.5A2.25 2.25 0 0 1 15.75 18H4.25A2.25 2.25 0 0 1 2 15.75V4.25Z" /></svg>,
     compact: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5"><path fillRule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75ZM2 10a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 10Zm0 5.25a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 15.25ZM2 10a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" /></svg>,
@@ -141,7 +150,7 @@ const ChevronIcon = ({ isOpen }: { isOpen: boolean }) => (
 
 const TrackItem: React.FC<any> = ({ 
     track, onTrackHoverStart, onTrackHoverEnd, raceSelectionIds, onToggleRaceSelection, 
-    simulationState, onDeleteTrack, onViewDetails, onUpdateTrackMetadata, isHovered, viewMode = 'full'
+    simulationState, onDeleteTrack, onViewDetails, onUpdateTrackMetadata, isHovered, viewMode = 'full', onOpenReview
 }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [tempName, setTempName] = useState(track.name);
@@ -174,12 +183,15 @@ const TrackItem: React.FC<any> = ({
                       className="w-4 h-4 text-cyan-500 bg-slate-600 border-slate-500 rounded focus:ring-offset-0 focus:ring-0" 
                       disabled={simulationState === 'running' || simulationState === 'paused'}
                     />
-                    <span 
-                        className={`text-xs truncate cursor-pointer font-medium ${isHovered ? 'text-cyan-200 font-bold' : 'text-slate-100'}`}
-                        onClick={() => onViewDetails(track.id)}
-                    >
-                        {track.name}
-                    </span>
+                    <div className="flex flex-col min-w-0">
+                        <span 
+                            className={`text-xs truncate cursor-pointer font-medium ${isHovered ? 'text-cyan-200 font-bold' : 'text-slate-100'}`}
+                            onClick={() => onViewDetails(track.id)}
+                        >
+                            {track.name}
+                        </span>
+                        <RatingStars rating={track.rating} reason={track.ratingReason} size="xs" onDetailClick={(e) => { e.stopPropagation(); onOpenReview?.(track.id); }} />
+                    </div>
                     <span className="text-[10px] text-slate-300 font-bold shrink-0 opacity-80">{track.distance.toFixed(1)}k</span>
                 </div>
                 <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -203,7 +215,10 @@ const TrackItem: React.FC<any> = ({
                 </div>
                 <div className="flex-grow min-w-0">
                     <div className="flex items-center justify-between">
-                        <span className={`text-xs font-bold truncate cursor-pointer ${isHovered ? 'text-cyan-300' : 'text-white'}`} onClick={() => onViewDetails(track.id)}>{track.name}</span>
+                        <div className="flex flex-col min-w-0">
+                            <span className={`text-xs font-bold truncate cursor-pointer ${isHovered ? 'text-cyan-300' : 'text-white'}`} onClick={() => onViewDetails(track.id)}>{track.name}</span>
+                            <RatingStars rating={track.rating} reason={track.ratingReason} size="xs" onDetailClick={(e) => { e.stopPropagation(); onOpenReview?.(track.id); }} />
+                        </div>
                         <input 
                           type="checkbox" 
                           checked={raceSelectionIds.has(track.id)} 
@@ -232,13 +247,16 @@ const TrackItem: React.FC<any> = ({
                 <div className="cursor-pointer shrink-0" onClick={() => onViewDetails(track.id)}>
                     <TrackPreview points={track.points} color={track.color} className="w-16 h-12 bg-slate-900 rounded border border-slate-600 shadow-lg" />
                 </div>
-                <div className="flex-grow overflow-hidden flex flex-col min-w-0">
+                <div className="flex-grow flex flex-col min-w-0">
                     <div className="flex items-center justify-between gap-2">
-                        {isEditing ? (
-                            <input autoFocus className="bg-slate-800 text-sm border border-cyan-500 rounded px-1 w-full outline-none text-white" value={tempName} onChange={e => setTempName(e.target.value)} onBlur={handleNameSubmit} onKeyDown={e => e.key === 'Enter' && handleNameSubmit()} />
-                        ) : (
-                            <span className={`font-bold truncate text-base cursor-pointer ${isHovered ? 'text-cyan-200' : 'text-white'}`} onClick={() => onViewDetails(track.id)} onDoubleClick={() => setIsEditing(true)}>{track.name}</span>
-                        )}
+                        <div className="flex flex-col min-w-0 flex-grow">
+                            {isEditing ? (
+                                <input autoFocus className="bg-slate-800 text-sm border border-cyan-500 rounded px-1 w-full outline-none text-white" value={tempName} onChange={e => setTempName(e.target.value)} onBlur={handleNameSubmit} onKeyDown={e => e.key === 'Enter' && handleNameSubmit()} />
+                            ) : (
+                                <span className={`font-bold truncate text-base cursor-pointer ${isHovered ? 'text-cyan-200' : 'text-white'}`} onClick={() => onViewDetails(track.id)} onDoubleClick={() => setIsEditing(true)}>{track.name}</span>
+                            )}
+                            <RatingStars rating={track.rating} reason={track.ratingReason} onDetailClick={(e) => { e.stopPropagation(); onOpenReview?.(track.id); }} />
+                        </div>
                         <div className="flex items-center space-x-1 shrink-0">
                             <button onClick={() => onUpdateTrackMetadata?.(track.id, { isFavorite: !track.isFavorite })} className="p-1 hover:bg-slate-500 rounded transition-all"><StarIcon filled={track.isFavorite} /></button>
                             <input type="checkbox" checked={raceSelectionIds.has(track.id)} onChange={() => onToggleRaceSelection(track.id)} className="w-5 h-5 text-cyan-500 bg-slate-600 border-slate-500 rounded" disabled={simulationState === 'running' || simulationState === 'paused'} />
@@ -268,11 +286,11 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
     tracks, onFileUpload, visibleTrackIds, onToggleVisibility,
     raceSelectionIds, onToggleRaceSelection, onStartRace, onGoToEditor, onStartVeo, onPauseRace, onResumeRace, onResetRace, simulationState,
     onTrackHoverStart, onTrackHoverEnd, hoveredTrackId, sortOrder, onDeleteTrack, onViewDetails,
-    onOpenChangelog, onOpenProfile, onOpenGuide, onOpenCalendar, simulationSpeed, raceRanks, runnerGapsToLeader,
+    onOpenChangelog, onOpenProfile, onOpenGuide, onOpenDiary, simulationSpeed, raceRanks, runnerGapsToLeader,
     collapsedGroups, onToggleGroup, 
     onExportBackup, onImportBackup, onCloseMobile, onUpdateTrackMetadata,
-    onToggleExplorer, showExplorer,
-    listViewMode, onListViewModeChange, onSpeedChange
+    onShowGroup, onRegenerateTitles, onToggleExplorer, showExplorer,
+    listViewMode, onListViewModeChange, onSpeedChange, onAiBulkRate, isAiRating, onOpenReview
   } = props;
 
   const [groupingMode, setGroupingMode] = useState<GroupingMode>('activity');
@@ -335,7 +353,7 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
           <div className={`bg-slate-900/60 rounded-lg border border-slate-700 shadow-inner overflow-hidden transition-all duration-300 ${isHeaderExpanded ? 'w-full' : 'flex-1 min-w-[140px]'}`}>
               <button onClick={() => setIsHeaderExpanded(!isHeaderExpanded)} className="w-full flex items-center justify-between p-3 hover:bg-slate-700/50 transition-colors">
                   <div className="flex items-center gap-2">
-                    <h1 className={`font-black text-cyan-400 tracking-tighter transition-all ${isHeaderExpanded ? 'text-2xl' : 'text-xs'}`}>GPX Viz</h1>
+                    <h1 className={`font-black text-cyan-400 tracking-tighter transition-all ${isHeaderExpanded ? 'text-2xl' : 'text-xs'}`}>GPX VIZ</h1>
                     {!isHeaderExpanded && <span className="text-[9px] text-white font-black uppercase tracking-widest bg-cyan-900/50 px-1 rounded">v1.17</span>}
                   </div>
                   <ChevronIcon isOpen={isHeaderExpanded} />
@@ -437,9 +455,17 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
                     <div className="flex items-center gap-2 mb-3">
                          <select value={groupingMode} onChange={e => setGroupingMode(e.target.value as GroupingMode)} className="flex-grow bg-slate-900 border border-slate-700 text-white text-[11px] font-bold rounded px-2 py-1.5 outline-none cursor-pointer focus:border-cyan-500"><option value="none">Vista Piatta</option><option value="activity">Tipo Allenamento</option><option value="folder">Cartelle Personali</option><option value="distance">Range Distanza</option><option value="date">Data (Mese/Anno)</option></select>
                          <div className="flex items-center gap-1 shrink-0">
-                            <button onClick={onOpenCalendar} className="p-1.5 text-slate-100 hover:text-white bg-slate-700 border border-slate-600 rounded transition-all shadow-sm" title="Calendario"><CalendarIcon /></button>
+                            <button onClick={onOpenDiary} className="p-1.5 text-slate-100 hover:text-white bg-slate-700 border border-slate-600 rounded transition-all shadow-sm" title="Diario delle Corse"><DiaryIcon /></button>
                             <button onClick={onToggleExplorer} className={`p-1.5 rounded border transition-all shadow-sm ${showExplorer ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-slate-700 text-slate-100 border-slate-600 hover:text-white'}`} title="Esplora in griglia">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path d="M4.25 2A2.25 2.25 0 0 0 2 4.25v2.5A2.25 2.25 0 0 0 4.25 9h2.5A2.25 2.25 0 0 0 9 6.75v-2.5A2.25 2.25 0 0 0 6.75 2h-2.5ZM4.25 11A2.25 2.25 0 0 0 2 13.25v2.5A2.25 2.25 0 0 0 4.25 18h2.5A2.25 2.25 0 0 0 9 15.75v-2.5A2.25 2.25 0 0 0 6.75 11h-2.5ZM11 4.25A2.25 2.25 0 0 1 13.25 2h2.5A2.25 2.25 0 0 1 18 4.25v2.5A2.25 2.25 0 0 1 15.75 9h-2.5A2.25 2.25 0 0 1 11 6.75v-2.5ZM13.25 11A2.25 2.25 0 0 0 11 13.25v2.5A2.25 2.25 0 0 0 13.25 18h2.5A2.25 2.25 0 0 0 18 15.75v-2.5A2.25 2.25 0 0 0 15.75 11h-2.5Z" /></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path d="M4.25 2A2.25 2.25 0 0 0 2 4.25v2.5A2.25 2.25 0 0 0 4.25 9h2.5A2.25 2.25 0 0 0 9 6.75v-2.5A2.25 2.25 0 0 0 6.75 2h-2.5ZM4.25 11A2.25 2.25 0 0 0 2 13.25v2.5A2.25 2.25 0 0 0 4.25 18h2.5A2.25 2.25 0 0 0 9 15.75v-2.5A2.25 2.25 0 0 0 6.75 11h-2.5ZM11 4.25A2.25 2.25 0 0 1 13.25 2h2.5A2.25 2.25 0 0 1 18 4.25v2.5A2.25 2.25 0 0 1 15.75 9h-2.5A2.25 2.25 0 0 1 11 6.75v-2.5ZM13.25 11A2.25 2.25 0 0 1 11 13.25v2.5A2.25 2.25 0 0 0 13.25 18h2.5A2.25 2.25 0 0 0 18 15.75v-2.5A2.25 2.25 0 0 0 15.75 11h-2.5Z" /></svg>
+                            </button>
+                            <button 
+                                onClick={onAiBulkRate} 
+                                disabled={isAiRating}
+                                className={`p-1.5 rounded border transition-all shadow-sm ${isAiRating ? 'bg-amber-600/50 text-white border-amber-500 animate-pulse' : 'bg-slate-700 text-amber-400 border-slate-600 hover:text-amber-300'}`} 
+                                title="Valutazione AI Stelle (nuove corse)"
+                            >
+                                <WandIcon />
                             </button>
                          </div>
                     </div>
@@ -453,11 +479,11 @@ const Sidebar: React.FC<SidebarProps> = (props) => {
                                         <div className="flex items-center justify-between group/folder hover:bg-slate-700/50 rounded px-1 transition-colors sticky top-0 bg-slate-800 z-10 py-1 border-b border-slate-700">
                                             <button onClick={() => toggleFolder(folderName)} className="flex items-center text-left py-1 rounded transition-colors flex-grow"><span className={`transition-transform duration-200 mr-1.5 ${isCollapsed ? '-rotate-90' : ''}`}><ChevronIcon isOpen={true} /></span><span className="text-[10px] font-black uppercase text-cyan-400 tracking-widest truncate">{folderName}</span><span className="ml-2 text-[10px] font-black text-white bg-cyan-900/80 rounded-full px-2 border border-cyan-700/50">{folderTracks.length}</span></button>
                                         </div>
-                                        {!isCollapsed && (<ul className={`mt-2 ${listViewMode === 'minimal' ? 'space-y-1' : 'space-y-2'}`}>{folderTracks.map(track => (<TrackItem key={track.id} track={track} onTrackHoverStart={onTrackHoverStart} onTrackHoverEnd={onTrackHoverEnd} raceSelectionIds={raceSelectionIds} onToggleRaceSelection={onToggleRaceSelection} simulationState={simulationState} onDeleteTrack={onDeleteTrack} onViewDetails={onViewDetails} onUpdateTrackMetadata={onUpdateTrackMetadata} isHovered={hoveredTrackId === track.id} viewMode={listViewMode} />))}</ul>)}
+                                        {!isCollapsed && (<ul className={`mt-2 ${listViewMode === 'minimal' ? 'space-y-1' : 'space-y-2'}`}>{folderTracks.map(track => (<TrackItem key={track.id} track={track} onTrackHoverStart={onTrackHoverStart} onTrackHoverEnd={onTrackHoverEnd} raceSelectionIds={raceSelectionIds} onToggleRaceSelection={onToggleRaceSelection} simulationState={simulationState} onDeleteTrack={onDeleteTrack} onViewDetails={onViewDetails} onUpdateTrackMetadata={onUpdateTrackMetadata} isHovered={hoveredTrackId === track.id} viewMode={listViewMode} onOpenReview={onOpenReview} />))}</ul>)}
                                     </div>
                                 );
                             })
-                        ) : (<ul className={`${listViewMode === 'minimal' ? 'space-y-1' : 'space-y-2'}`}>{tracksToDisplay.map(track => (<TrackItem key={track.id} track={track} onTrackHoverStart={onTrackHoverStart} onTrackHoverEnd={onTrackHoverEnd} raceSelectionIds={raceSelectionIds} onToggleRaceSelection={onToggleRaceSelection} simulationState={simulationState} onDeleteTrack={onDeleteTrack} onViewDetails={onViewDetails} onUpdateTrackMetadata={onUpdateTrackMetadata} isHovered={hoveredTrackId === track.id} viewMode={listViewMode} />))}</ul>)}
+                        ) : (<ul className={`${listViewMode === 'minimal' ? 'space-y-1' : 'space-y-2'}`}>{tracksToDisplay.map(track => (<TrackItem key={track.id} track={track} onTrackHoverStart={onTrackHoverStart} onTrackHoverEnd={onTrackHoverEnd} raceSelectionIds={raceSelectionIds} onToggleRaceSelection={onToggleRaceSelection} simulationState={simulationState} onDeleteTrack={onDeleteTrack} onViewDetails={onViewDetails} onUpdateTrackMetadata={onUpdateTrackMetadata} isHovered={hoveredTrackId === track.id} viewMode={listViewMode} onOpenReview={onOpenReview} />))}</ul>)}
                     </div>
                 </div>
             ) : (<RaceLeaderboard racers={tracksToDisplay} ranks={raceRanks} gaps={runnerGapsToLeader} />)}

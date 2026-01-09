@@ -1,10 +1,10 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Track, ChatMessage, UserProfile, AiPersonality, PlannedWorkout, ActivityType } from '../types';
 import { GoogleGenAI, Chat, Type, GenerateContentResponse } from '@google/genai';
 import { calculateTrackStats } from '../services/trackStatsService';
 import { loadChatFromDB, saveChatToDB } from '../services/dbService';
 import FormattedAnalysis from './FormattedAnalysis';
+import AiTrainingCoachPanel from './AiTrainingCoachPanel';
 
 interface ChatbotProps {
   tracksToAnalyze: Track[];
@@ -42,23 +42,14 @@ const SparklesIcon = () => (
     </svg>
 );
 
-const CalendarAddIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 mr-1.5">
-        <path fillRule="evenodd" d="M5.75 2a.75.75 0 0 1 .75.75V4h7V2.75a.75.75 0 0 1 1.5 0V4h.25A2.75 2.75 0 0 1 18 6.75v8.5A2.75 2.75 0 0 1 15.25 18H4.75A2.75 2.75 0 0 1 2 15.25v-8.5A2.75 2.75 0 0 1 4.75 4H5V2.75A.75.75 0 0 1 5.75 2Zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75ZM10 9.75a.75.75 0 0 1 .75.75v1.5h1.5a.75.75 0 0 1 0 1.5h-1.5v1.5a.75.75 0 0 1-1.5 0v-1.5h-1.5a.75.75 0 0 1 0-1.5h1.5v-1.5a.75.75 0 0 1 .75-.75Z" clipRule="evenodd" />
-    </svg>
-);
-
 const Chatbot: React.FC<ChatbotProps> = ({ tracksToAnalyze, userProfile, onClose, isStandalone = false, onAddPlannedWorkout, isSidebar = false }) => {
     const [messages, setMessages] = useState<ChatMessage[]>([] as ChatMessage[]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [isPianificatoreLoading, setIsPianificatoreLoading] = useState(false);
     const [isMaximized, setIsMaximized] = useState(false);
-    const [dims, setDims] = useState({ w: 400, h: 500 });
+    const [dims] = useState({ w: 450, h: 600 });
     const chatRef = useRef<Chat | null>(null);
     const scrollAreaRef = useRef<HTMLDivElement>(null);
-    const isResizing = useRef(false);
-    const resizeType = useRef<'both' | 'h' | 'v' | null>(null);
     const CHAT_ID = 'global-coach';
     
     const getSystemInstruction = useCallback(() => {
@@ -122,40 +113,20 @@ const Chatbot: React.FC<ChatbotProps> = ({ tracksToAnalyze, userProfile, onClose
 
     const handleSend = (e: React.FormEvent) => { e.preventDefault(); performSendMessage(input); };
 
-    const handlePianificaAllenamento = async (lastResponse: string) => {
-        if (isPianificatoreLoading || !onAddPlannedWorkout) return;
-        setIsPianificatoreLoading(true);
-        try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const today = new Date().toISOString().split('T')[0];
-            const prompt = `Analizza questa risposta di un coach AI e trasforma il suggerimento di allenamento in un oggetto JSON strutturato. Risposta: "${lastResponse}". Data odierna: ${today}.`;
-            const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview', contents: prompt,
-                config: {
-                    responseMimeType: 'application/json',
-                    responseSchema: {
-                        type: Type.OBJECT,
-                        properties: {
-                            title: { type: Type.STRING }, description: { type: Type.STRING },
-                            date: { type: Type.STRING }, activityType: { type: Type.STRING, enum: ['Lento', 'Fartlek', 'Gara', 'Ripetute', 'Lungo', 'Altro'] }
-                        },
-                        required: ['title', 'description', 'date', 'activityType']
-                    }
-                }
-            });
-            const data = JSON.parse(response.text || '{}');
-            onAddPlannedWorkout({ id: `planned-${Date.now()}`, title: data.title, description: data.description, date: new Date(data.date), activityType: data.activityType as ActivityType, isAiSuggested: true });
-        } catch (e) { console.error(e); } finally { setIsPianificatoreLoading(false); }
-    };
-
+    // Responsive window style
     const windowStyle: React.CSSProperties = isMaximized 
         ? { position: 'fixed', top: 0, bottom: 0, left: 0, right: 0, width: 'auto', height: 'auto', zIndex: 6000, borderRadius: 0 }
         : isSidebar 
             ? { width: '100%', height: '100%', position: 'relative' }
-            : { width: `${dims.w}px`, height: `${dims.h}px`, position: 'relative', zIndex: 4000 };
+            : { 
+                width: window.innerWidth < 640 ? '100%' : `${dims.w}px`, 
+                height: window.innerWidth < 640 ? '100%' : `${dims.h}px`, 
+                position: 'relative', 
+                zIndex: 4000 
+              };
 
     return (
-        <div style={windowStyle} className={`flex flex-col bg-slate-800 text-white shadow-2xl overflow-hidden border border-slate-700 transition-all duration-300 ${!isMaximized && !isSidebar ? 'rounded-lg' : ''}`}>
+        <div style={windowStyle} className={`flex flex-col bg-slate-800 text-white shadow-2xl overflow-hidden border border-slate-700 transition-all duration-300 ${!isMaximized && !isSidebar && window.innerWidth >= 640 ? 'rounded-lg' : ''}`}>
             <header className="flex items-center justify-between p-3 border-b border-slate-700 bg-slate-900 flex-shrink-0 cursor-default select-none">
                 <div className="flex items-center">
                     <SparklesIcon />
@@ -165,17 +136,30 @@ const Chatbot: React.FC<ChatbotProps> = ({ tracksToAnalyze, userProfile, onClose
                     </div>
                 </div>
                 <div className="flex items-center space-x-1">
-                    <button onClick={() => setIsMaximized(!isMaximized)} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors active:scale-90" title={isMaximized ? "Riduci" : "Tutto Schermo"}>
-                        {isMaximized ? (
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M4.25 10a.75.75 0 0 0-1.5 0v4.25H7a.75.75 0 0 0 0-1.5H4.25V10ZM13 5.75a.75.75 0 0 0 0 1.5h2.75V10a.75.75 0 0 0 1.5 0V5.75H13Z" /><path d="M15.75 10a.75.75 0 0 1 1.5 0v4.25H13a.75.75 0 0 1 0-1.5h2.75V10ZM7 5.75a.75.75 0 0 1 0 1.5H4.25V10a.75.75 0 0 1-1.5 0V5.75H7Z" /></svg>
-                        ) : (
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M3.25 3A.75.75 0 0 1 4 3.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 3.25 3Zm3.5 0A.75.75 0 0 1 7.5 3.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 6.75 3ZM13.25 3a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Zm3.5 0a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75ZM3.25 13a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Zm3.5 0a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Zm6.5 0a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Zm3.5 0a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Z" clipRule="evenodd" /></svg>
-                        )}
-                    </button>
-                    {onClose && <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded transition-colors text-xl leading-none">&times;</button>}
+                    {!isSidebar && window.innerWidth >= 640 && (
+                        <button onClick={() => setIsMaximized(!isMaximized)} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors active:scale-90" title={isMaximized ? "Riduci" : "Tutto Schermo"}>
+                            {isMaximized ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M4.25 10a.75.75 0 0 0-1.78 0v4.25H7a.75.75 0 0 0 0-1.5H4.25V10ZM13 5.75a.75.75 0 0 0 0 1.5h2.75V10a.75.75 0 0 0 1.5 0V5.75H13Z" /><path d="M15.75 10a.75.75 0 0 1 1.5 0v4.25H13a.75.75 0 0 1 0-1.5h2.75V10ZM7 5.75a.75.75 0 0 1 0 1.5H4.25V10a.75.75 0 0 1-1.5 0V5.75H7Z" /></svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M3.25 3A.75.75 0 0 1 4 3.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 3.25 3Zm3.5 0A.75.75 0 0 1 7.5 3.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 6.75 3ZM13.25 3a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Zm3.5 0a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75ZM3.25 13a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75ZM3.5 13a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75ZM6.75 13a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75ZM13.25 13a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75ZM16.75 13a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75Z" clipRule="evenodd" /></svg>
+                            )}
+                        </button>
+                    )}
+                    {onClose && <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded transition-colors text-xl leading-none" title="Chiudi">&times;</button>}
                 </div>
             </header>
             <div ref={scrollAreaRef} className="flex-grow p-4 overflow-y-auto space-y-4 custom-scrollbar bg-slate-800/50">
+                {messages.length <= 1 && (
+                    <div className="mb-6 animate-fade-in-down">
+                        <AiTrainingCoachPanel 
+                            userProfile={userProfile} 
+                            allHistory={tracksToAnalyze} 
+                            onAddPlannedWorkout={onAddPlannedWorkout}
+                            isCompact={true}
+                        />
+                    </div>
+                )}
+                
                 {messages.map((msg, index) => (
                     <div key={index} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                         <div className={`max-w-[85%] p-3 rounded-2xl shadow-sm ${msg.role === 'user' ? 'bg-cyan-700 text-white rounded-br-none' : 'bg-slate-700 border border-slate-600 rounded-bl-none'}`}>

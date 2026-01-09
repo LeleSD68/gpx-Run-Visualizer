@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { GoogleGenAI, Type, GenerateContentResponse } from '@google/genai';
 import { Track, Weather } from '../types';
@@ -35,7 +34,7 @@ const isRetryableError = (e: any): boolean => {
             // Ignore
         }
     }
-    const status = e?.status || e?.error?.status || '';
+    const status = String(e?.status || e?.error?.status || '');
     const code = e?.code || e?.error?.code;
     if (code === 503 || status === 'UNAVAILABLE' || status.toLowerCase() === 'unavailable') return true;
 

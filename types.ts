@@ -1,5 +1,4 @@
-
-export type ActivityType = 'Lento' | 'Fartlek' | 'Gara' | 'Ripetute' | 'Lungo' | 'Altro';
+export type ActivityType = 'Lento' | 'Fartlek' | 'Ripetute' | 'Gara' | 'Lungo' | 'Altro';
 
 export type AiPersonality = 'strict' | 'motivator' | 'enthusiast' | 'analytic' | 'pro_balanced';
 
@@ -27,6 +26,15 @@ export interface Track {
   folder?: string;
   notes?: string; // Note specifiche per la corsa
   shoe?: string; // Modello di scarpa usata
+  rating?: number; // Valutazione da 0 a 5 stelle
+  ratingReason?: string; // Motivazione della valutazione AI
+}
+
+export interface MonthlyStats {
+    totalDistance: number;
+    totalDuration: number;
+    activityCount: number;
+    avgPace: number;
 }
 
 export interface PlannedWorkout {
@@ -40,7 +48,7 @@ export interface PlannedWorkout {
 
 export interface RaceRunner {
   trackId: string;
-  position: { lat: number; lon: number };
+  position: TrackPoint;
   color: string;
   pace: number; // Ritmo attuale in min/km
 }
@@ -69,6 +77,7 @@ export interface MapDisplayProps {
   runnerSpeeds: Map<string, number>;
   selectionPoints?: TrackPoint[] | null;
   hoveredPoint?: TrackPoint | null; // For editor hover
+  hoveredData?: Record<string, string> | null; // Formatted data for the hover cursor
   pauseSegments?: PauseSegment[]; // For editor pause markers
   showPauses?: boolean;
   onMapHover?: (point: TrackPoint | null) => void; // For editor map hover -> chart sync
@@ -83,6 +92,7 @@ export interface MapDisplayProps {
   // Animation Props
   animationTrack?: Track | null;
   animationProgress?: number;
+  animationPace?: number; // Real-time pace for animation cursor
   onExitAnimation?: () => void;
   fastestSplitForAnimation?: Split | null;
   animationHighlight?: Split | null;

@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { Track, TrackPoint, PauseSegment } from '../types';
 import { getTrackPointAtDistance } from '../services/trackEditorUtils';
@@ -436,10 +435,10 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                                 strokeDasharray="3,3"
                             />
                             
-                            {/* Unified Multi-Metric Tooltip */}
+                            {/* Unified Multi-Metric Tooltip - Shows only active metrics */}
                             <g transform={`translate(${hoveredX + 15 + 140 > width ? hoveredX - 155 : hoveredX + 15}, 5)`}>
                                 <rect 
-                                    x="0" y="0" width="140" height={22 + (['pace', 'elevation', 'speed', 'hr', 'cad'].filter(m => hoveredValues[m] !== null).length * 16)} rx="6"
+                                    x="0" y="0" width="140" height={22 + (['pace', 'elevation', 'speed', 'hr', 'cad'].filter(m => yAxisMetrics.includes(m as any) && hoveredValues![m] !== null).length * 16)} rx="6"
                                     fill="rgba(15, 23, 42, 0.95)"
                                     stroke="#334155"
                                     strokeWidth="1"
@@ -448,8 +447,8 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                                 <text x="10" y="18" fill="#f1f5f9" fontSize="11" fontWeight="bold" className="uppercase tracking-tight">
                                     Km: {hoveredPoint.cummulativeDistance.toFixed(2)}
                                 </text>
-                                {['pace', 'elevation', 'speed', 'hr', 'cad'].filter(m => hoveredValues[m] !== null).map((metric, i) => {
-                                    const value = hoveredValues[metric] as number;
+                                {['pace', 'elevation', 'speed', 'hr', 'cad'].filter(m => yAxisMetrics.includes(m as any) && hoveredValues![m] !== null).map((metric, i) => {
+                                    const value = hoveredValues![metric] as number;
                                     const info = metricInfo[metric];
                                     return (
                                         <text key={metric} x="10" y={34 + i * 16} fill={info.color} fontSize="11" fontWeight="600">
@@ -462,7 +461,7 @@ const TimelineChart: React.FC<TimelineChartProps> = ({ track, onSelectionChange,
                              {yAxisMetrics.map(metric => {
                                 const domain = metricDomains[metric];
                                 if (!domain) return null;
-                                const value = hoveredValues[metric];
+                                const value = hoveredValues![metric];
                                 if (value === null || value === undefined) return null;
                                 
                                 const domainRange = domain.max - domain.min;

@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Track, TrackPoint, Split, PauseSegment, AiSegment, UserProfile, TrackStats, PlannedWorkout } from '../types';
 import MapDisplay from './MapDisplay';
@@ -11,6 +10,7 @@ import AiTrainingCoachPanel from './AiTrainingCoachPanel';
 import ResizablePanel from './ResizablePanel';
 import HeartRateZonePanel from './HeartRateZonePanel';
 import PersonalRecordsPanel from './PersonalRecordsPanel';
+import RatingStars from './RatingStars';
 import { calculateTrackStats } from '../services/trackStatsService';
 import { getPointsInDistanceRange } from '../services/trackEditorUtils';
 import { smoothTrackPoints, calculateSmoothedMetrics } from '../services/dataProcessingService';
@@ -22,6 +22,8 @@ interface TrackDetailViewProps {
     allHistory?: Track[];
     onUpdateTrackMetadata?: (id: string, metadata: Partial<Track>) => void;
     onAddPlannedWorkout?: (workout: PlannedWorkout) => void;
+    onStartAnimation?: (id: string) => void;
+    onOpenReview?: (trackId: string) => void;
 }
 
 const useIsMobile = () => {
@@ -41,6 +43,18 @@ const metricLabels: Record<YAxisMetric, string> = {
     hr: 'FC',
 };
 
+const metricFormatters: Record<YAxisMetric, (v: number) => string> = {
+    pace: (p) => {
+        if (!isFinite(p) || p <= 0) return '--:--';
+        const m = Math.floor(p);
+        const s = Math.round((p - m) * 60);
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    },
+    elevation: (v) => `${v.toFixed(0)}m`,
+    speed: (v) => `${v.toFixed(1)}k/h`,
+    hr: (v) => `${Math.round(v)}bpm`
+};
+
 const ClockIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 mr-1">
         <path fillRule="evenodd" d="M8 15A7 7 0 1 0 8 1a7 7 0 0 0 0 14Zm.75-10.25a.75.75 0 0 0-1.5 0v4.5c0 .414.336.75.75.75h4.5a.75.75 0 0 0 0-1.5h-3.75v-3.75Z" clipRule="evenodd" />
@@ -56,6 +70,13 @@ const NoteIcon = () => (
 const ShoeIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 mr-2 text-cyan-400">
         <path d="M2.273 5.625A4.483 4.483 0 0 1 5.25 4.5h13.5c1.141 0 2.183.425 2.977 1.125A3 3 0 0 0 18.75 3H5.25a3 3 0 0 0-2.977 2.625ZM2.273 8.625A4.483 4.483 0 0 1 5.25 7.5h13.5c1.141 0 2.183.425 2.977 1.125A3 3 0 0 0 18.75 6H5.25a3 3 0 0 0-2.977 2.625ZM5.25 9a3 3 0 0 0-3 3v2.25a3 3 0 0 0 3 3h13.5a3 3 0 0 0 3-3V12a3 3 0 0 0-3-3H5.25Z" />
+    </svg>
+);
+
+const ReplayIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 mr-1">
+        <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H3.989a.75.75 0 0 0-.75.75v4.242a.75.75 0 0 0 1.5 0v-2.43l.31.31a7 7 0 0 0 11.712-3.138.75.75 1 0-1.449-.399Z" clipRule="evenodd" />
+        <path fillRule="evenodd" d="M4.688 8.576a5.5 5.5 0 0 1 9.201-2.466l.312.311h-2.433a.75.75 0 0 0 0 1.5h4.243a.75.75 0 0 0 .75-.75V3.029a.75.75 0 0 0-1.5 0v2.43l-.31-.31a7 7 0 0 0-11.712 3.138.75.75 0 0 0 1.449.399Z" clipRule="evenodd" />
     </svg>
 );
 
@@ -96,7 +117,7 @@ const SelectionStatsOverlay: React.FC<{ stats: TrackStats, onClose: () => void }
     </div>
 );
 
-const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, onExit, allHistory = [], onUpdateTrackMetadata, onAddPlannedWorkout }) => {
+const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, onExit, allHistory = [], onUpdateTrackMetadata, onAddPlannedWorkout, onStartAnimation, onOpenReview }) => {
     const isMobile = useIsMobile();
     const [yAxisMetrics, setYAxisMetrics] = useState<YAxisMetric[]>(['pace']);
     const [hoveredPoint, setHoveredPoint] = useState<TrackPoint | null>(null);
@@ -124,6 +145,23 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
         const tempTrack: Track = { ...displayTrack, id: 'temp-selection', name: 'Selection', points: points, distance: chartSelection.endDistance - chartSelection.startDistance, duration: points[points.length - 1].time.getTime() - points[0].time.getTime() };
         return calculateTrackStats(tempTrack, 0);
     }, [chartSelection, displayTrack]);
+
+    const hoveredDataForMap = useMemo((): Record<string, string> | null => {
+        if (!hoveredPoint) return null;
+        const data: Record<string, string> = {};
+        const pointIndex = track.points.findIndex(p => p.time.getTime() === hoveredPoint.time.getTime());
+        if (pointIndex === -1) return null;
+
+        const { speed, pace } = calculateSmoothedMetrics(track.points, pointIndex, smoothingWindow);
+        
+        yAxisMetrics.forEach(m => {
+            if (m === 'pace') data[metricLabels[m]] = metricFormatters[m](pace);
+            else if (m === 'speed') data[metricLabels[m]] = metricFormatters[m](speed);
+            else if (m === 'elevation') data[metricLabels[m]] = metricFormatters[m](hoveredPoint.ele);
+            else if (m === 'hr' && hoveredPoint.hr) data[metricLabels[m]] = metricFormatters[m](hoveredPoint.hr);
+        });
+        return data;
+    }, [hoveredPoint, track.points, yAxisMetrics, smoothingWindow]);
 
     useEffect(() => {
         if (hoveredPoint && displayTrack && mapGradientMetric !== 'none' && mapGradientMetric !== 'hr_zones') {
@@ -191,9 +229,8 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
     const handleShoeChange = (e: React.ChangeEvent<HTMLSelectElement>) => onUpdateTrackMetadata?.(track.id, { shoe: e.target.value });
     
     const statsContent = (
-        <div className="space-y-6 p-3 sm:p-5">
+        <div className="space-y-6 p-3 sm:p-5 pb-12">
             <StatsPanel stats={stats} selectedSegment={selectedSegment} onSegmentSelect={handleSegmentSelect} />
-            <AiTrainingCoachPanel track={displayTrack} stats={stats} userProfile={userProfile} allHistory={allHistory} onAddPlannedWorkout={onAddPlannedWorkout} />
 
             <div className="border-t border-slate-700 pt-5">
                 <label className="block text-sm font-black text-cyan-400 uppercase tracking-widest mb-3 flex items-center">
@@ -217,21 +254,29 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
             <WeatherPanel track={track} />
             <GeminiTrackAnalysisPanel stats={stats} userProfile={userProfile} track={displayTrack} allHistory={allHistory} />
             <GeminiSegmentsPanel track={displayTrack} stats={stats} onSegmentSelect={handleSegmentSelect} selectedSegment={selectedSegment as AiSegment} />
+            <AiTrainingCoachPanel track={displayTrack} stats={stats} userProfile={userProfile} allHistory={allHistory} onAddPlannedWorkout={onAddPlannedWorkout} />
         </div>
     );
 
     const chartControls = (
         <div className="w-full h-full flex items-center justify-between px-2 bg-slate-800/90 border-b border-slate-700">
-            <div className="flex space-x-0.5">
-                {(['pace', 'elevation', 'speed', 'hr'] as const).map(metric => {
-                    const isDisabled = metric === 'hr' && !hasHrData;
-                    const isActive = yAxisMetrics.includes(metric);
-                    return (
-                        <button key={metric} onClick={() => toggleYAxisMetric(metric)} disabled={isDisabled} className={`px-1.5 py-0.5 text-[7px] sm:text-[10px] uppercase tracking-widest rounded transition-all font-black border ${isActive ? 'bg-cyan-600 border-cyan-400 text-white shadow-md' : 'bg-slate-700 border-slate-600 text-slate-300'} ${isDisabled ? 'opacity-20 cursor-not-allowed' : ''}`}>
-                            {metricLabels[metric]}
-                        </button>
-                    );
-                })}
+            <div className="flex items-center space-x-1 sm:space-x-2">
+                <div className="flex space-x-0.5">
+                    {(['pace', 'elevation', 'speed', 'hr'] as const).map(metric => {
+                        const isDisabled = metric === 'hr' && !hasHrData;
+                        const isActive = yAxisMetrics.includes(metric);
+                        return (
+                            <button key={metric} onClick={() => toggleYAxisMetric(metric)} disabled={isDisabled} className={`px-1.5 py-0.5 text-[7px] sm:text-[10px] uppercase tracking-widest rounded transition-all font-black border ${isActive ? 'bg-cyan-600 border-cyan-400 text-white shadow-md' : 'bg-slate-700 border-slate-600 text-slate-300'} ${isDisabled ? 'opacity-20 cursor-not-allowed' : ''}`}>
+                                {metricLabels[metric]}
+                            </button>
+                        );
+                    })}
+                </div>
+                <div className="h-4 w-px bg-slate-700 mx-1"></div>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                    <span className="text-[7px] sm:text-[9px] text-slate-400 uppercase font-black whitespace-nowrap">Smooth: {smoothingWindow}s</span>
+                    <input type="range" min="1" max="120" value={smoothingWindow} onChange={(e) => setSmoothingWindow(parseInt(e.target.value))} className="w-12 sm:w-24 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400" />
+                </div>
             </div>
             <button onClick={() => setShowPauses(p => !p)} className={`flex items-center px-1.5 py-0.5 text-[8px] sm:text-[10px] uppercase tracking-widest rounded transition-all font-black border ${showPauses ? 'bg-amber-600 border-amber-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>
                 <ClockIcon /> Pause
@@ -274,6 +319,7 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
                 hoveredTrackId={null}
                 runnerSpeeds={new Map()}
                 hoveredPoint={hoveredPoint}
+                hoveredData={hoveredDataForMap}
                 onMapHover={handleHoverChange}
                 coloredPauseSegments={showPauses ? stats.pauses : undefined}
                 selectionPoints={selectionPoints}
@@ -291,14 +337,28 @@ const TrackDetailView: React.FC<TrackDetailViewProps> = ({ track, userProfile, o
              <header className="flex items-center justify-between p-2 sm:p-3 bg-slate-800 border-b border-slate-700 flex-shrink-0 z-30 shadow-lg">
                 <button onClick={onExit} className="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-white font-black py-1.5 px-3 sm:py-2 sm:px-5 rounded-lg transition-all shadow-sm text-[10px] sm:text-sm">&larr; {isMobile ? 'INDIETRO' : 'CHIUDI'}</button>
                 <div className="text-center px-2 flex-grow min-w-0">
-                    <h1 className="text-xs sm:text-xl font-black text-cyan-400 uppercase tracking-tighter truncate">Analisi Attività</h1>
-                    {!isMobile && <p className="text-xs text-slate-100 font-bold truncate max-w-md mx-auto">{track.name}</p>}
+                    <div className="flex flex-col items-center">
+                        <h1 className="text-xs sm:text-xl font-black text-cyan-400 uppercase tracking-tighter truncate">Analisi Attività</h1>
+                        <div className="flex items-center gap-2">
+                             <RatingStars 
+                                rating={track.rating} 
+                                reason={track.ratingReason} 
+                                size="md" 
+                                onDetailClick={(e) => { e.stopPropagation(); onOpenReview?.(track.id); }}
+                             />
+                             {!isMobile && <p className="text-xs text-slate-100 font-bold truncate max-w-md">{track.name}</p>}
+                        </div>
+                    </div>
                 </div>
                 <div className="flex items-center gap-1.5 sm:gap-3">
-                   <div className="flex flex-col items-end">
-                        <span className="text-[7px] text-slate-400 uppercase font-bold">SMOOTH {smoothingWindow}S</span>
-                        <input type="range" min="1" max="120" value={smoothingWindow} onChange={(e) => setSmoothingWindow(parseInt(e.target.value))} className="w-12 sm:w-20 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400" />
-                    </div>
+                    {onStartAnimation && (
+                        <button 
+                            onClick={() => onStartAnimation(track.id)}
+                            className="bg-cyan-600 hover:bg-cyan-500 border border-cyan-400 text-white font-black py-1.5 px-3 sm:py-2 sm:px-5 rounded-lg transition-all shadow-md flex items-center gap-1 text-[10px] sm:text-sm whitespace-nowrap active:scale-95"
+                        >
+                            <ReplayIcon /> REPLAY
+                        </button>
+                    )}
                 </div>
             </header>
 
